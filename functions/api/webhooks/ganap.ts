@@ -155,7 +155,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
   let clientId: string;
   const existingClient = await db
-    .prepare(`SELECT id, workos_user_id, invitation_status FROM clients WHERE email = ?`)
+    .prepare(`SELECT id, workos_user_id, invitation_status FROM clients WHERE LOWER(email) = LOWER(?)`)
     .bind(email)
     .first<{ id: string; workos_user_id: string | null; invitation_status: string }>();
 

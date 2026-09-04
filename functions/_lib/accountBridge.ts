@@ -31,8 +31,15 @@ export async function linkClientAccount(db: D1Database, workosUserId: string, em
   // guardrail, a WorkOS user is only ever linked to a client with a
   // matching paid order behind it. No row here means no paid order: never
   // provision access.
+  //
+  // Case-insensitive on purpose: WorkOS commonly normalizes emails to
+  // lowercase on signup, while the email stored here comes verbatim from
+  // whatever the customer typed at checkout (only trimmed, not
+  // lowercased) — an exact-match comparison would wrongly report
+  // "no_matching_client" for the very same address typed with different
+  // capitalization.
   const client = await db
-    .prepare(`SELECT id FROM clients WHERE email = ? AND workos_user_id IS NULL`)
+    .prepare(`SELECT id FROM clients WHERE LOWER(email) = LOWER(?) AND workos_user_id IS NULL`)
     .bind(email)
     .first<{ id: string }>();
   if (!client) return { outcome: "no_matching_client" };
