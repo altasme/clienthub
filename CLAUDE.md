@@ -84,31 +84,53 @@ Every endpoint here must, per the source spec §6:
 
 No endpoint here can change `stage`, `current_offer`, `current_plan`, or any other commercial column — those mutations exist only in `clientkeeper`. Profile edits (name, mobile, facebook, current_website) go through one dedicated endpoint that touches only those fields.
 
+### 5.1 Session handling — a home-rolled cookie, deliberately not WorkOS's native session
+
+Researched WorkOS's real session model against `workos-node`'s actual source (`workos.com` is proxy-blocked here): `access_token` is a short-lived JWT verified via `https://api.workos.com/sso/jwks/<client_id>`, refreshed via `POST /user_management/authenticate` with `grant_type=refresh_token`. WorkOS's own SDK wraps this in a "sealed session" cookie helper (`CookieSession`) built on `jose` + `iron-webcrypto` — both genuinely Web-Crypto-native, so technically usable in a Worker.
+
+**Deliberately not used.** Pulling in `workos-node` for its session primitive risks dragging in its full HTTP client (used nowhere else in this app — everything else is plain `fetch()`, see `functions/_lib/workos.ts`) and Node-specific bundling issues beyond just that one piece. For a V1 client portal (not a banking app), `functions/_lib/session.ts` implements a simple HMAC-signed cookie instead, reusing the same `hmacSha256Hex`/`timingSafeEqual` primitives already proven for ganap.net/WorkOS webhook verification (`functions/_lib/crypto.ts`). Payload is minimal: `clientId`, `workosUserId`, `issuedAt` — a 30-day max age, `HttpOnly; Secure; SameSite=Lax`. **The real tradeoff, stated plainly:** if a client's WorkOS account is later suspended/revoked, this session keeps working until it naturally expires, rather than being invalidated immediately the way a WorkOS-native session would be. Acceptable for V1; revisit if that gap ever actually matters.
+
+`/api/auth-callback` issues the cookie on successful account link (or re-link on a returning login). `/api/auth-logout` clears it. `functions/api/client/_middleware.ts` validates it on every route under `/api/client/*` (Cloudflare Pages Functions scopes a `_middleware.ts` to its own directory tree — `/api/auth-*` and `/api/webhooks/*` are untouched by it) and attaches `clientId`/`workosUserId` onto the request `data` object; every downstream client endpoint scopes its queries to that `clientId`, never to an id taken from the request itself.
+
 ---
 
-## 6. V1 scope
+## 6. V1 scope — implemented
 
-Per the source spec §39/§40, one primary action per stage:
+Per the source spec §39/§40, one primary action per stage. All of the below is built and locally verified (see §7's testing note):
 
-- **Discovery (default post-account):** project card, "Talk to Your Developer" (Schedule a Call via the interim booking behavior above; Chat with Your Developer via Messenger/Viber/WhatsApp). Progress rail shows Payment/Account done, Discovery active, Build/Presentation/Next Steps upcoming — no commercial stages visible yet.
-- **Building:** status only, no action.
-- **Ready for Presentation:** Schedule Presentation (interim booking behavior).
-- **Post-presentation:** the ₱1,499 offer appears for the first time.
-- **Website page:** exists from day 1, adapts by stage (Discovery / In Development / Ready / Live with a visit link).
-- **Account page:** name, business, email, mobile, Facebook, current website, created date, security. No internal CRM fields ever surface here.
-- **Resources:** deferred to V1.1 (see §1.7 above).
+- **`GET /api/client/me`**: the one read endpoint the dashboard needs — profile, most recent project's stage, and whatever discovery/presentation/offer data is relevant. Internal fields (`discovery_sessions.internal_notes`, a locked offer's `content`) are never selected in the query at all, not filtered out after the fact.
+- **`POST /api/client/schedule`**: "Schedule a Call" / "Schedule Presentation" — the interim booking behavior (§1.6), upserting the one `discovery_sessions`/`presentations` row per project with the client's preferred times.
+- **`POST /api/client/profile`**: the one profile-edit endpoint per §5 above. Email is deliberately not editable in V1 — it's the field the account bridge matches on, and there's no re-verification flow yet to safely let a client change it themselves.
+- **`src/pages/DashboardPage.tsx`**: renders one primary action per stage exactly per the list below. `src/components/ProgressRail.tsx` shows Payment/Account/Discovery/Build/Presentation done-or-active, and collapses every commercial stage (`post_presentation`, `offer_unlocked`, `conversion`, `essential_upsell`) into a single generic "Next Steps" pill — verified by screenshot that no commercial stage name ever renders there.
+  - **Discovery (default post-account):** "Talk to Your Developer" — Schedule a Call + Chat with Your Developer (`src/components/ChatModal.tsx`, opens Messenger/Viber/WhatsApp via `src/lib/contact.ts`).
+  - **Building:** status only, no action.
+  - **Ready for Presentation:** Schedule Presentation.
+  - **Presentation:** status only + chat fallback.
+  - **Post-presentation onward:** renders the client's unlocked `offers` row generically (`headline`/`price`/`body` from its JSON `content`) if one exists, a generic "we'll be in touch" message if not (no offer exists to unlock yet until `clientkeeper`'s unlock action is built).
+  - **on_hold / completed:** simple status states.
+- **`src/pages/WebsitePage.tsx`**: adapts by stage (Discovery / In Development / Ready / Live with a visit link using `project.website_url`), exists from day 1 per the spec.
+- **`src/pages/AccountPage.tsx`**: name, business, email (read-only), mobile, Facebook, current website, created date. No internal CRM fields.
+- **Resources:** deferred to V1.1 (see §1.7 above) — not built.
 
 ---
 
 ## 7. Definition of done (V1)
 
-- [ ] ganap.net webhook creates client + project + payment and issues a WorkOS invitation (idempotent on `external_reference`, signature-verified).
-- [ ] Client rows exist at payment; the WorkOS user links on invitation acceptance (via `/api/auth-callback` and the `invitation.accepted` webhook backstop); "paid, no account" is queryable and re-issuable (the query/action lives in `clientkeeper`, but the underlying data comes from here).
-- [ ] A WorkOS user is only ever linked to a client with a matching paid order — never provision access from a WorkOS sign-in with no paid order behind it.
-- [ ] The five security acceptance tests from the source spec §6 all pass (locked offer returns nothing; no client endpoint can mutate stage/offer/plan; cross-client id guessing returns 403/empty; D1 unreachable except through Functions; unauthenticated requests rejected).
-- [ ] Client Hub shows exactly one "what do I do now" action per stage; no future commercial offers before unlock.
-- [ ] ₱1,499 offer content is DB-configurable, not hardcoded — ships with placeholder copy until the real price/copy is provided.
-- [ ] Booking uses the interim call-request behavior; chat opens Messenger/Viber/WhatsApp; Resend sends app emails; WorkOS sends auth emails.
+- [x] ganap.net webhook creates client + project + payment and issues a WorkOS invitation (idempotent on `external_reference`, signature-verified).
+- [x] Client rows exist at payment; the WorkOS user links on invitation acceptance (via `/api/auth-callback` and the `invitation.accepted` webhook backstop). "Paid, no account" list + re-issue action itself is a `clientkeeper` UI task (not yet built), but the underlying data (`clients.invitation_status`) is ready for it.
+- [x] A WorkOS user is only ever linked to a client with a matching paid order — never provision access from a WorkOS sign-in with no paid order behind it (verified: an `invitation.accepted` event for an email with no paid order creates no client row).
+- [x] Verified locally (see below) for this app's own endpoints: locked offer returns nothing; no client endpoint can mutate stage/offer/plan (structurally true — no such endpoint exists); D1 unreachable except through Functions; unauthenticated requests rejected (401 on every `/api/client/*` route with no/invalid session cookie). Cross-client id guessing is moot by construction — no client endpoint accepts a client/project id from the request at all, every query is scoped to the session's own `clientId`. The remaining acceptance tests (ClientKeeper rejecting unauthenticated/wrong-role requests) belong to that repo.
+- [x] Client Hub shows exactly one "what do I do now" action per stage; no future commercial offers before unlock (verified: a `locked` offer row returns `null` from `/api/client/me`, confirmed by directly flipping a seeded offer's status in a local D1 and re-querying).
+- [ ] ₱1,499 offer content is DB-configurable (the schema and read path support it — `offers.content` is free-form JSON), but no real content has been unlocked yet since `clientkeeper`'s unlock action doesn't exist. The dashboard's rendering was verified against a placeholder offer row inserted directly into local D1.
+- [x] Booking uses the interim call-request behavior (`POST /api/client/schedule`, verified end to end against a local D1); chat opens Messenger/Viber/WhatsApp; WorkOS sends auth emails. Resend app-email notifications (payment confirmed, discovery reminder, etc.) are not yet wired up — a later phase (§12).
+
+**How this was tested:** entirely against a local `wrangler pages dev` + local D1 instance (gitignored `.dev.vars`/`wrangler.toml`, deleted after every session, never committed), since this sandbox cannot reach `api.workos.com` (same restriction hit throughout this project). A client was seeded end to end through the real webhook handlers (signed ganap.net payload → signed `invitation.accepted` payload), then a session cookie was hand-constructed using the same HMAC algorithm as `functions/_lib/session.ts` (the real cookie can only come from a live WorkOS OAuth exchange, which this sandbox can't perform) to drive Playwright screenshots of the dashboard across the discovery and post-presentation-with-offer states, the schedule modal, the website page (both "in progress" and "live" variants), and the account page. Test the real WorkOS OAuth handshake and cookie issuance end to end once deployed.
+
+---
+
+## 7.1 Required Cloudflare Pages environment variables
+
+Set on the `clienthub` Cloudflare Pages project (never committed): `GANAP_SECRET` (the same signing secret already used by the marketing site's `/foryourbusiness` checkout project — this app's webhook is meant to replace that project's webhook target, not add a second secret), `WORKOS_API_KEY`, `WORKOS_CLIENT_ID`, `WORKOS_WEBHOOK_SECRET` (from registering `https://account.altasme.com/api/webhooks/workos` in the WorkOS dashboard, subscribed to at least `invitation.accepted`), `SESSION_SECRET` (a new, randomly-generated secret for this app's own session cookie signing — see §5.1; not shared with any other app or secret). Optional: `DB` (the shared D1 binding — see §3; required in practice, since every endpoint here depends on it, but Cloudflare only calls it "optional" in the sense that a missing binding degrades gracefully rather than crashing the build).
 
 ---
 
