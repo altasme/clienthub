@@ -13,15 +13,12 @@ const DAY_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   minute: "2-digit",
 });
 
-// The meeting link is deliberately withheld until the day of the
-// presentation ("you'll see it here on the day of the presentation") --
-// compares calendar dates in Asia/Manila, not raw timestamps, since
-// "today" means the presentation's own local day, not a 24h window.
-function isPresentationToday(scheduledAt: string | null | undefined): boolean {
-  if (!scheduledAt) return false;
-  const manilaDateKey = (d: Date) =>
-    new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
-  return manilaDateKey(new Date(scheduledAt)) === manilaDateKey(new Date());
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 flex-shrink-0 text-green-600">
+      <path fillRule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0l-3.5-3.5a1 1 0 111.4-1.4l2.8 2.8 6.8-6.8a1 1 0 011.4 0z" clipRule="evenodd" />
+    </svg>
+  );
 }
 
 function Card({ children }: { children: React.ReactNode }) {
@@ -203,16 +200,14 @@ export default function DashboardPage() {
               <span className="font-semibold text-brand-navy">{DAY_TIME_FORMATTER.format(new Date(me.presentation.scheduledAt))}</span>.
             </p>
           )}
-          {isPresentationToday(me.presentation?.scheduledAt) && me.presentation?.meetingLink ? (
+          {me.presentation?.meetingLink ? (
             <p className="mt-1 text-sm">
               <a href={me.presentation.meetingLink} target="_blank" rel="noreferrer" className="text-brand-blue hover:underline">
                 Join the call &rarr;
               </a>
             </p>
           ) : (
-            <p className="mt-1 text-sm text-ink/60">
-              We'll send you the meeting link via chat, or you'll see it here on the day of the presentation.
-            </p>
+            <p className="mt-1 text-sm text-ink/60">We'll send you the meeting link via chat, or you'll see it here once it's set.</p>
           )}
           <BlurredPreview />
           <div className="mt-5">
@@ -223,29 +218,37 @@ export default function DashboardPage() {
 
       {(stage === "post_presentation" || stage === "offer_unlocked" || stage === "conversion" || stage === "essential_upsell") && (
         <Card>
-          <p className="text-sm font-semibold text-brand-blue">What's Next</p>
-          {me.offer ? (
-            <>
-              <h2 className="mt-1 text-xl font-bold text-brand-navy">
+          <p className="text-sm font-semibold text-brand-blue">We're Live!</p>
+          <h2 className="mt-1 text-xl font-bold text-brand-navy">Your website is now live!</h2>
+          {me.project?.websiteUrl && (
+            <p className="mt-2 text-sm">
+              <a href={me.project.websiteUrl} target="_blank" rel="noopener noreferrer" className="font-semibold text-brand-blue hover:underline">
+                {me.project.websiteUrl}
+              </a>
+            </p>
+          )}
+          <p className="mt-2 flex items-center gap-2 text-sm text-ink/60">
+            <CheckIcon /> Online and up 24/7
+          </p>
+
+          {me.offer && (
+            <div className="mt-5 border-t border-ink/10 pt-5">
+              <h3 className="text-lg font-bold text-brand-navy">
                 {typeof me.offer.content?.headline === "string" ? me.offer.content.headline : "A next step for your business"}
-              </h2>
+              </h3>
               {typeof me.offer.content?.price === "string" && (
                 <p className="mt-2 text-2xl font-extrabold text-brand-navy">{me.offer.content.price}</p>
               )}
               {typeof me.offer.content?.body === "string" && <p className="mt-2 text-sm text-ink/60">{me.offer.content.body}</p>}
-              <div className="mt-5">
-                <SecondaryButton onClick={() => setChatOpen(true)}>Chat with Your Developer</SecondaryButton>
-              </div>
-            </>
-          ) : (
-            <>
-              <h2 className="mt-1 text-xl font-bold text-brand-navy">Your website is now live!</h2>
-              <p className="mt-2 text-sm text-ink/60">We'll reach out with next steps shortly.</p>
-              <div className="mt-5">
-                <SecondaryButton onClick={() => setChatOpen(true)}>Chat with Your Developer</SecondaryButton>
-              </div>
-            </>
+            </div>
           )}
+
+          <div className="mt-5">
+            <p className="text-sm font-semibold text-brand-navy">Got questions?</p>
+            <div className="mt-2">
+              <SecondaryButton onClick={() => setChatOpen(true)}>Chat with Your Developer</SecondaryButton>
+            </div>
+          </div>
         </Card>
       )}
 

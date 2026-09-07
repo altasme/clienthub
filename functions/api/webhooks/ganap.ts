@@ -52,9 +52,20 @@
 // best-effort — a missing pair just skips the confirmation email (logged),
 // since the client/project/payment rows already committed are the part
 // that actually matters.
+//
+// Auto-assigns the Starter Plan [2026-09-07]: a brand-new client (never
+// seen this email before) gets an active `subscriptions` row for
+// "starter" (functions/_lib/pricing.ts, ₱299), so the Account page's
+// "Your Plan" card and ClientKeeper's client view have something to show
+// from day one, not just after a Digital Growth Plans purchase. Staff can
+// override this from ClientKeeper (functions/api/app/clients/[id]/
+// set-plan.ts there). A returning client (an existing row matched by
+// email) does NOT get this — a second ₱299 payment for a second project
+// shouldn't silently reset whatever plan they've already been set to.
 
 import { hmacSha256Hex, timingSafeEqual } from "../../_lib/crypto";
 import { sendEmail, paymentConfirmationEmail } from "../../_lib/email";
+import { findCatalogItem } from "../../_lib/pricing";
 
 interface Env {
   GANAP_SECRET: string;
@@ -208,23 +219,33 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     .bind(crypto.randomUUID(), projectId, now)
     .run();
 
+  const paymentId = crypto.randomUUID();
   await db
     .prepare(
       `INSERT INTO payments (id, client_id, ganap_reference_number, external_reference, amount, currency, status, raw_payload, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .bind(
-      crypto.randomUUID(),
-      clientId,
-      payload.referenceNumber,
-      payload.externalReference,
-      payload.amount,
-      payload.currency,
-      payload.status,
-      rawBody,
-      now
-    )
+    .bind(paymentId, clientId, payload.referenceNumber, payload.externalReference, payload.amount, payload.currency, payload.status, rawBody, now)
     .run();
+
+  // Every new client starts on the Starter Plan (₱299, the /foryourbusiness
+  // offer they just paid for) — staff can override this later from
+  // ClientKeeper (functions/api/app/clients/[id]/set-plan.ts there). Only
+  // for a genuinely NEW client: a returning client paying for a second
+  // project already has their own plan history, which a second ₱299
+  // payment shouldn't silently reset.
+  if (!existingClient) {
+    const starterPlan = findCatalogItem("starter");
+    if (starterPlan) {
+      await db
+        .prepare(
+          `INSERT INTO subscriptions (id, client_id, plan, status, started_at, item_type, item_id, item_name, billing_cycle, amount_php, payment_id)
+           VALUES (?, ?, ?, 'active', ?, 'plan', ?, ?, ?, ?, ?)`
+        )
+        .bind(crypto.randomUUID(), clientId, starterPlan.name, now, starterPlan.id, starterPlan.name, starterPlan.billing, starterPlan.chargeNowPhp, paymentId)
+        .run();
+    }
+  }
 
   // Payment confirmation email — the only client-facing touch this
   // webhook makes now. hasAccount decides the footer: a brand-new client

@@ -60,6 +60,12 @@ const PRICING_GATE_STAGE: Stage = "post_presentation";
 
 export const onRequestPost: PagesFunction<Env, string, { clientId: string }> = async ({ request, env, data }) => {
   if (!env.GANAP_INTERNAL_UPSELL_SECRET || !env.GANAP_INTERNAL_UPSELL_PROJECT_UUID || !env.DB) {
+    const missing = [
+      !env.GANAP_INTERNAL_UPSELL_SECRET && "GANAP_INTERNAL_UPSELL_SECRET",
+      !env.GANAP_INTERNAL_UPSELL_PROJECT_UUID && "GANAP_INTERNAL_UPSELL_PROJECT_UUID",
+      !env.DB && "DB binding",
+    ].filter(Boolean);
+    console.error(`checkout-upsell: not configured, missing: ${missing.join(", ")}`);
     return jsonResponse(500, { error: "Payment is not configured yet. Please contact us directly." });
   }
   const db = env.DB;

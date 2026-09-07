@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMe } from "../lib/MeContext";
 import { updateProfile, purchaseItem } from "../lib/api";
+import { findPlan } from "../content/pricing";
 
 const inputClasses =
   "w-full rounded-xl border border-ink/15 px-4 py-2.5 text-sm text-ink outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20";
@@ -46,6 +47,19 @@ function YourPlanCard() {
           <p className="text-xs text-ink/60">
             {plan.billingCycle === "one_time" ? "One-time purchase" : `₱${plan.amountPhp} — billed ${plan.billingCycle}`}
           </p>
+          {(() => {
+            const planDetails = findPlan(plan.itemId);
+            if (!planDetails || planDetails.included.length === 0) return null;
+            return (
+              <ul className="mt-3 space-y-1.5 border-t border-ink/10 pt-3">
+                {planDetails.included.map((f) => (
+                  <li key={f} className="flex items-start gap-2 text-xs text-ink/70">
+                    <span className="text-brand-blue">&#10003;</span> {f}
+                  </li>
+                ))}
+              </ul>
+            );
+          })()}
           {plan.nextRenewalDate && plan.renewalAmountPhp && (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-ink/10 pt-3">
               <p className="text-xs text-ink/60">

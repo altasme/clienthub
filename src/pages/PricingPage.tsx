@@ -62,6 +62,16 @@ export default function PricingPage() {
     setChatOpen(true);
   };
 
+  // Add-ons are chat-only, not self-checkout (walked back from an earlier
+  // "all purchasable" decision) — the price is still shown for
+  // transparency, but every add-on's CTA opens a chat with a
+  // price-aware prefill instead of a checkout, regardless of
+  // `item.purchasable`.
+  const openAddonChat = (itemName: string, priceLabel: string) => {
+    setChatPrefill(`Hi Altaventures! I'm interested in adding "${itemName}" (${priceLabel}) to my plan. Can we talk about this?`);
+    setChatOpen(true);
+  };
+
   if (!me.pricingUnlocked) {
     return (
       <div className="space-y-4">
@@ -169,22 +179,13 @@ export default function PricingPage() {
                       <p className="whitespace-nowrap text-sm font-bold text-brand-navy">{item.priceLabel}</p>
                       {owned ? (
                         <span className="whitespace-nowrap rounded-full bg-brand-blue/10 px-4 py-2 text-xs font-semibold text-brand-blue">Active</span>
-                      ) : item.purchasable ? (
-                        <button
-                          type="button"
-                          disabled={pending === item.id}
-                          onClick={() => handleBuy(item.id)}
-                          className="whitespace-nowrap rounded-full bg-brand-blue px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#0b57cc] disabled:opacity-50"
-                        >
-                          {pending === item.id ? "Starting..." : "Add"}
-                        </button>
                       ) : (
                         <button
                           type="button"
-                          onClick={() => openQuoteChat(item.name)}
+                          onClick={() => openAddonChat(item.name, item.priceLabel)}
                           className="whitespace-nowrap rounded-full border border-ink/15 px-4 py-2 text-xs font-semibold text-brand-navy transition hover:border-brand-blue hover:text-brand-blue"
                         >
-                          Request Quote
+                          Chat with Developer
                         </button>
                       )}
                     </div>
