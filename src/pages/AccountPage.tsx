@@ -45,7 +45,7 @@ function YourPlanCard() {
         <div className="rounded-xl border border-ink/10 bg-paper-alt p-4">
           <p className="text-sm font-semibold text-brand-navy">{plan.itemName}</p>
           <p className="text-xs text-ink/60">
-            {plan.billingCycle === "one_time" ? "One-time purchase" : `₱${plan.amountPhp} — billed ${plan.billingCycle}`}
+            {plan.billingCycle === "one_time" ? "One-time purchase" : `₱${plan.amountPhp}, billed ${plan.billingCycle}`}
           </p>
           {(() => {
             const planDetails = findPlan(plan.itemId);

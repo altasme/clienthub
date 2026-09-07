@@ -73,12 +73,12 @@ export function paymentConfirmationEmail(params: {
 
   const html = `
     <p>Hi ${escapeHtml(greetingName)},</p>
-    <p>We've received your payment of &#8369;${amount} ${escapeHtml(currency)} for <strong>${escapeHtml(businessName)}</strong>. Thanks for choosing Altaventures &mdash; we're excited to get started on your website.</p>
+    <p>We've received your payment of &#8369;${amount} ${escapeHtml(currency)} for <strong>${escapeHtml(businessName)}</strong>. Thanks for choosing Altaventures. We're excited to get started on your website.</p>
     <p>We'll be in touch shortly with next steps.</p>
     ${footer}
   `;
 
-  return { subject: `Payment Received — ${businessName || "Your Website"}`, html };
+  return { subject: `Payment Received: ${businessName || "Your Website"}`, html };
 }
 
 /**
@@ -102,7 +102,7 @@ export function upsellPurchaseEmail(params: {
 
   const renewalNote =
     renewalAmount && nextRenewalDate
-      ? `<p style="margin-top: 16px; font-size: 14px; color: #667085;">This renews at &#8369;${renewalAmount} on ${escapeHtml(new Date(nextRenewalDate).toLocaleDateString())}. There's no auto-charge &mdash; we'll let you know when it's time, and you can renew from your Account page.</p>`
+      ? `<p style="margin-top: 16px; font-size: 14px; color: #667085;">This renews at &#8369;${renewalAmount} on ${escapeHtml(new Date(nextRenewalDate).toLocaleDateString())}. There's no auto-charge. We'll let you know when it's time, and you can renew from your Account page.</p>`
       : "";
 
   const html = `
@@ -112,5 +112,5 @@ export function upsellPurchaseEmail(params: {
     <p style="margin-top: 24px; font-size: 14px; color: #667085;">You can see this in your <a href="https://account.altasme.com/account">Altaventures dashboard</a> any time.</p>
   `;
 
-  return { subject: `Purchase Confirmed — ${itemName}`, html };
+  return { subject: `Purchase Confirmed: ${itemName}`, html };
 }

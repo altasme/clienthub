@@ -95,7 +95,7 @@ export default function PricingPage() {
       <div className="space-y-4">
         <h1 className="text-2xl font-bold text-brand-navy">Pricing</h1>
         <div className="rounded-2xl border border-ink/10 bg-white p-6 sm:p-8">
-          <p className="text-sm text-ink/60">Growth plans and add-ons become available once your presentation is complete.</p>
+          <p className="max-w-prose text-sm text-ink/60">Growth plans and add-ons become available once your presentation is complete.</p>
         </div>
       </div>
     );

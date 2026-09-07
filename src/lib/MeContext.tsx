@@ -24,7 +24,7 @@ const AUTH_ERROR_COPY: Record<AuthErrorCode, { headline: string; body: string }>
   },
   auth_failed: {
     headline: "Something went wrong signing you in",
-    body: "Please try again — if this keeps happening, message us and we'll sort it out.",
+    body: "Please try again. If this keeps happening, message us and we'll sort it out.",
   },
 };
 

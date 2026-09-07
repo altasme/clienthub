@@ -5,7 +5,7 @@ const WEBSITE_STAGES: Record<string, { badge: string; headline: string; body: st
   payment_received: { badge: "Discovery", headline: "We're learning about your business.", body: "Once we understand your business, we'll start planning your website." },
   account_created: { badge: "Discovery", headline: "We're learning about your business.", body: "Once we understand your business, we'll start planning your website." },
   discovery: { badge: "Discovery", headline: "We're learning about your business.", body: "Once we understand your business, we'll start planning your website." },
-  building: { badge: "In Development", headline: "Your website is being built.", body: "We're actively working on it — check back for updates." },
+  building: { badge: "In Development", headline: "Your website is being built.", body: "We're actively working on it. Check back for updates." },
   ready_for_presentation: { badge: "Ready", headline: "Your website is ready.", body: "We'll walk through it together at your presentation." },
   presentation: { badge: "Ready", headline: "Your website is ready.", body: "We'll walk through it together at your presentation." },
 };
@@ -35,17 +35,17 @@ export default function WebsitePage() {
                 Visit Your Website &rarr;
               </a>
             ) : (
-              <p className="mt-2 text-sm text-ink/60">We'll add your website link here shortly.</p>
+              <p className="mt-2 max-w-prose text-sm text-ink/60">We'll add your website link here shortly.</p>
             )}
           </>
         ) : info ? (
           <>
             <p className="text-sm font-semibold text-brand-blue">{info.badge}</p>
             <h2 className="mt-1 text-xl font-bold text-brand-navy">{info.headline}</h2>
-            <p className="mt-2 text-sm text-ink/60">{info.body}</p>
+            <p className="mt-2 max-w-prose text-sm text-ink/60">{info.body}</p>
           </>
         ) : (
-          <p className="text-sm text-ink/60">We're getting your project set up.</p>
+          <p className="max-w-prose text-sm text-ink/60">We're getting your project set up.</p>
         )}
       </div>
     </div>

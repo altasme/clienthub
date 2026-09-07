@@ -57,22 +57,20 @@ function SecondaryButton({ onClick, children }: { onClick: () => void; children:
 // to show yet at this stage.
 function BuildingAnimation() {
   return (
-    <div className="mt-5 flex items-center justify-center rounded-xl border border-ink/10 bg-paper-alt py-10">
-      <div className="flex flex-col items-center gap-4">
-        <div className="flex h-14 w-20 flex-col overflow-hidden rounded-md border border-ink/15 bg-white shadow-sm">
-          <div className="flex h-3 items-center gap-1 border-b border-ink/10 bg-paper-alt px-1.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-ink/20" />
-            <span className="h-1.5 w-1.5 rounded-full bg-ink/20" />
-            <span className="h-1.5 w-1.5 rounded-full bg-ink/20" />
-          </div>
-          <div className="flex flex-1 items-center justify-center gap-1.5">
-            <span className="h-2 w-2 animate-bounce rounded-full bg-brand-blue [animation-delay:-0.3s]" />
-            <span className="h-2 w-2 animate-bounce rounded-full bg-brand-blue [animation-delay:-0.15s]" />
-            <span className="h-2 w-2 animate-bounce rounded-full bg-brand-blue" />
-          </div>
+    <div className="mt-6 flex flex-col items-center gap-4 border-t border-ink/10 pt-6">
+      <div className="flex h-14 w-20 flex-col overflow-hidden rounded-md border border-ink/15 bg-paper-alt">
+        <div className="flex h-3 items-center gap-1 border-b border-ink/10 px-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-ink/20" />
+          <span className="h-1.5 w-1.5 rounded-full bg-ink/20" />
+          <span className="h-1.5 w-1.5 rounded-full bg-ink/20" />
         </div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">Building in progress</p>
+        <div className="flex flex-1 items-center justify-center gap-1.5">
+          <span className="h-2 w-2 animate-bounce rounded-full bg-brand-blue [animation-delay:-0.3s]" />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-brand-blue [animation-delay:-0.15s]" />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-brand-blue" />
+        </div>
       </div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">Building in progress</p>
     </div>
   );
 }
@@ -84,8 +82,8 @@ function BuildingAnimation() {
 // presented as a teaser rather than real content.
 function BlurredPreview() {
   return (
-    <div className="relative mt-5 overflow-hidden rounded-xl border border-ink/10 bg-paper-alt">
-      <div className="pointer-events-none select-none p-6 blur-md" aria-hidden="true">
+    <div className="relative mt-6 overflow-hidden border-t border-ink/10 pt-6">
+      <div className="pointer-events-none select-none blur-md" aria-hidden="true">
         <div className="h-3 w-2/3 rounded bg-brand-navy/30" />
         <div className="mt-3 h-2 w-full rounded bg-ink/15" />
         <div className="mt-2 h-2 w-5/6 rounded bg-ink/15" />
@@ -96,7 +94,7 @@ function BlurredPreview() {
         </div>
       </div>
       <div className="absolute inset-0 flex items-center justify-center bg-white/40">
-        <p className="rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-brand-navy shadow-sm">
+        <p className="rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-brand-navy">
           Sneak peek &mdash; we don't want to spoil the surprise!
         </p>
       </div>
@@ -134,7 +132,7 @@ export default function DashboardPage() {
         <Card>
           <p className="text-sm font-semibold text-brand-blue">Getting Started</p>
           <h2 className="mt-1 text-xl font-bold text-brand-navy">We're setting up your project.</h2>
-          <p className="mt-2 text-sm text-ink/60">This only takes a moment. Refresh shortly if this doesn't update.</p>
+          <p className="mt-2 max-w-prose text-sm text-ink/60">This only takes a moment. Refresh shortly if this doesn't update.</p>
         </Card>
       ) : null}
 
@@ -142,7 +140,7 @@ export default function DashboardPage() {
         <Card>
           <p className="text-sm font-semibold text-brand-blue">Discovery</p>
           <h2 className="mt-1 text-xl font-bold text-brand-navy">Talk to Your Developer</h2>
-          <p className="mt-2 text-sm text-ink/60">
+          <p className="mt-2 max-w-prose text-sm text-ink/60">
             Let's learn more about your business so we can build something that actually works for you.
           </p>
           {me.discovery?.scheduledAt && (
@@ -168,7 +166,7 @@ export default function DashboardPage() {
         <Card>
           <p className="text-sm font-semibold text-brand-blue">Building</p>
           <h2 className="mt-1 text-xl font-bold text-brand-navy">We are building your website.</h2>
-          <p className="mt-2 text-sm text-ink/60">
+          <p className="mt-2 max-w-prose text-sm text-ink/60">
             Average build time is 4&ndash;7 days. Once it's built, we'll present it to you.
           </p>
           <BuildingAnimation />
@@ -182,7 +180,7 @@ export default function DashboardPage() {
         <Card>
           <p className="text-sm font-semibold text-brand-blue">Ready for Presentation</p>
           <h2 className="mt-1 text-xl font-bold text-brand-navy">Your website is ready.</h2>
-          <p className="mt-2 text-sm text-ink/60">
+          <p className="mt-2 max-w-prose text-sm text-ink/60">
             We'll be in touch shortly to set a time to walk through it together.
           </p>
           <div className="mt-5">
@@ -196,7 +194,7 @@ export default function DashboardPage() {
           <p className="text-sm font-semibold text-brand-blue">Presentation</p>
           <h2 className="mt-1 text-xl font-bold text-brand-navy">Your website is ready!</h2>
           {me.presentation?.scheduledAt && (
-            <p className="mt-2 text-sm text-ink/60">
+            <p className="mt-2 max-w-prose text-sm text-ink/60">
               We've scheduled the presentation date on{" "}
               <span className="font-semibold text-brand-navy">{DAY_TIME_FORMATTER.format(new Date(me.presentation.scheduledAt))}</span>.
             </p>
@@ -208,7 +206,7 @@ export default function DashboardPage() {
               </a>
             </p>
           ) : (
-            <p className="mt-1 text-sm text-ink/60">We'll send you the meeting link via chat, or you'll see it here once it's set.</p>
+            <p className="mt-1 max-w-prose text-sm text-ink/60">We'll send you the meeting link via chat, or you'll see it here once it's set.</p>
           )}
           <BlurredPreview />
           <div className="mt-5">
@@ -245,7 +243,7 @@ export default function DashboardPage() {
               {typeof me.offer.content?.price === "string" && (
                 <p className="mt-2 text-2xl font-extrabold text-brand-navy">{me.offer.content.price}</p>
               )}
-              {typeof me.offer.content?.body === "string" && <p className="mt-2 text-sm text-ink/60">{me.offer.content.body}</p>}
+              {typeof me.offer.content?.body === "string" && <p className="mt-2 max-w-prose text-sm text-ink/60">{me.offer.content.body}</p>}
             </div>
           )}
 
@@ -260,7 +258,7 @@ export default function DashboardPage() {
 
       {stage === "on_hold" && (
         <Card>
-          <p className="text-sm text-ink/60">Your project is currently on hold. Message us if you'd like to pick things back up.</p>
+          <p className="max-w-prose text-sm text-ink/60">Your project is currently on hold. Message us if you'd like to pick things back up.</p>
           <div className="mt-5">
             <SecondaryButton onClick={() => setChatOpen(true)}>Chat with Your Developer</SecondaryButton>
           </div>
