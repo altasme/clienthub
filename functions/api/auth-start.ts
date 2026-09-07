@@ -22,6 +22,18 @@
 // genuine passthrough OIDC-style param on this endpoint, with `login`
 // and `consent` as the two values its own test suite exercises.
 //
+// screen_hint=sign-up when ?intent=signup is passed. Without any hint,
+// AuthKit's hosted UI defaults to the sign-in screen (confirmed against
+// authkit-nextjs's own getScreenHint(), which falls back to 'sign-in'
+// unless told otherwise) — wrong for a client's very first visit right
+// after paying, who has no account yet and would otherwise have to
+// notice and click a "sign up" link themselves. The marketing site's
+// thank-you page passes ?intent=signup on its "Create Your Account"
+// link for exactly this reason. This file's own MeContext.tsx callers
+// (a session-expired *returning* client bounced back here) intentionally
+// omit ?intent so they keep getting the sign-in screen, which is correct
+// for them — screen_hint is per-call, not a global default flip.
+//
 // Required env vars: WORKOS_CLIENT_ID.
 
 interface Env {
@@ -30,10 +42,12 @@ interface Env {
 
 const REDIRECT_URI = "https://account.altasme.com/api/auth-callback";
 
-export const onRequestGet: PagesFunction<Env> = async ({ env }) => {
+export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   if (!env.WORKOS_CLIENT_ID) {
     return new Response("Auth is not configured yet. Please contact us directly.", { status: 500 });
   }
+
+  const intent = new URL(request.url).searchParams.get("intent");
 
   const authorizeUrl = new URL("https://api.workos.com/user_management/authorize");
   authorizeUrl.searchParams.set("client_id", env.WORKOS_CLIENT_ID);
@@ -41,6 +55,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ env }) => {
   authorizeUrl.searchParams.set("response_type", "code");
   authorizeUrl.searchParams.set("provider", "authkit");
   authorizeUrl.searchParams.set("prompt", "login");
+  if (intent === "signup") {
+    authorizeUrl.searchParams.set("screen_hint", "sign-up");
+  }
 
   return Response.redirect(authorizeUrl.toString(), 302);
 };
