@@ -211,6 +211,25 @@ Three small, purely presentational changes to `src/pages/DashboardPage.tsx`, all
 
 ## 12. Digital Growth Plans (Pricing page) [2026-09-07]
 
+**⚠️ REQUIRED MIGRATION, run once against the live database before/after deploying this section's code** — this is a genuine schema migration, not just an edit to `d1/schema.sql`. `subscriptions` and `payments` both gained new columns below; `d1/schema.sql`'s `CREATE TABLE IF NOT EXISTS` is a no-op against the already-existing live tables, so those columns never appeared there automatically. This exact gap caused a real production 500 on `GET /api/client/me` (2026-09-07) — its new subscriptions query selects columns that didn't exist yet on the live DB, which D1 throws on and Cloudflare turns into an uncaught-exception 500. Run via the D1 Console (or `wrangler d1 execute <database-name> --remote --command "..."` per line):
+
+```sql
+ALTER TABLE payments ADD COLUMN source TEXT NOT NULL DEFAULT 'foryourbusiness_299' CHECK (source IN ('foryourbusiness_299', 'internal_upsell'));
+
+ALTER TABLE subscriptions ADD COLUMN item_type TEXT NOT NULL DEFAULT 'plan' CHECK (item_type IN ('plan', 'addon'));
+ALTER TABLE subscriptions ADD COLUMN item_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE subscriptions ADD COLUMN item_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE subscriptions ADD COLUMN billing_cycle TEXT NOT NULL DEFAULT 'one_time' CHECK (billing_cycle IN ('one_time', 'annual', 'monthly'));
+ALTER TABLE subscriptions ADD COLUMN amount_php INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE subscriptions ADD COLUMN renewal_amount_php INTEGER;
+ALTER TABLE subscriptions ADD COLUMN next_renewal_date TEXT;
+ALTER TABLE subscriptions ADD COLUMN payment_id TEXT REFERENCES payments(id);
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_client_id ON subscriptions(client_id);
+```
+
+Verified end to end against a local D1 instance seeded with the exact pre-migration schema (old `payments`/`subscriptions` shape, one pre-existing row each): all statements applied cleanly, the pre-existing rows backfilled with sane defaults (`item_type='plan'`, `amount_php=0`, `source='foryourbusiness_299'`, etc. — nothing broke on old rows), a fresh insert matching `functions/api/webhooks/internal-upsell.ts`'s exact column list succeeded, and the CHECK constraints correctly rejected an invalid `item_type` value. Only an *existing* database needs this manual step — a brand-new database created from the current `d1/schema.sql` picks up every column automatically via its `CREATE TABLE` statements, same as the `clients.welcome_dismissed_at` precedent in §9.
+
 Post-presentation onward, ClientKeeper can now "reveal additional details" to the client in the form of a real Pricing page — transcribed from the operator's rate-card images (`ALTAVENTURES_RATES_2.zip`, 11 slides) into actual content, not raw images, per the operator's explicit instruction. Purchasing goes through a new, separate ganap.net project (`alta_internal_upsell`, credentials supplied in `Internal_Upsell.txt`) — not the `/foryourbusiness` project.
 
 **Scope decisions, resolved via `AskUserQuestion` before any code was written** (three real forks, none obvious from the request alone):
