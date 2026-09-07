@@ -35,7 +35,17 @@ function AuthErrorScreen({ code }: { code: AuthErrorCode }) {
   const handleRetry = () => {
     // Clear the ?error= param before retrying so a repeated failure doesn't
     // silently loop — a fresh attempt always starts from a clean URL.
-    window.location.href = "/api/auth-start";
+    //
+    // no_account specifically means: this person completed a real WorkOS
+    // sign-in/signup, but the email didn't match any paid order — most
+    // likely because they mistyped it or used a different address than
+    // the one they checked out with. Retrying should send them back
+    // through account creation (?intent=signup), not a plain sign-in
+    // retry, so they get another clean shot at entering the right email
+    // from the start rather than landing on a screen that assumes they
+    // already have an account. auth_failed is a generic exchange/session
+    // failure unrelated to email matching, so it keeps the plain retry.
+    window.location.href = code === "no_account" ? "/api/auth-start?intent=signup" : "/api/auth-start";
   };
 
   return (
