@@ -13,6 +13,17 @@ const DAY_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   minute: "2-digit",
 });
 
+// The meeting link is deliberately withheld until the day of the
+// presentation ("you'll see it here on the day of the presentation") --
+// compares calendar dates in Asia/Manila, not raw timestamps, since
+// "today" means the presentation's own local day, not a 24h window.
+function isPresentationToday(scheduledAt: string | null | undefined): boolean {
+  if (!scheduledAt) return false;
+  const manilaDateKey = (d: Date) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+  return manilaDateKey(new Date(scheduledAt)) === manilaDateKey(new Date());
+}
+
 function Card({ children }: { children: React.ReactNode }) {
   return <div className="rounded-2xl border border-ink/10 bg-white p-6 sm:p-8">{children}</div>;
 }
@@ -38,6 +49,60 @@ function SecondaryButton({ onClick, children }: { onClick: () => void; children:
     >
       {children}
     </button>
+  );
+}
+
+// A small looping "in progress" visual for the Building stage — three
+// staggered bouncing dots inside a browser-window frame, built entirely
+// from Tailwind's built-in animate-bounce (no custom keyframes, no new
+// dependency) rather than a real screenshot, since there's nothing real
+// to show yet at this stage.
+function BuildingAnimation() {
+  return (
+    <div className="mt-5 flex items-center justify-center rounded-xl border border-ink/10 bg-paper-alt py-10">
+      <div className="flex flex-col items-center gap-4">
+        <div className="flex h-14 w-20 flex-col overflow-hidden rounded-md border border-ink/15 bg-white shadow-sm">
+          <div className="flex h-3 items-center gap-1 border-b border-ink/10 bg-paper-alt px-1.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-ink/20" />
+            <span className="h-1.5 w-1.5 rounded-full bg-ink/20" />
+            <span className="h-1.5 w-1.5 rounded-full bg-ink/20" />
+          </div>
+          <div className="flex flex-1 items-center justify-center gap-1.5">
+            <span className="h-2 w-2 animate-bounce rounded-full bg-brand-blue [animation-delay:-0.3s]" />
+            <span className="h-2 w-2 animate-bounce rounded-full bg-brand-blue [animation-delay:-0.15s]" />
+            <span className="h-2 w-2 animate-bounce rounded-full bg-brand-blue" />
+          </div>
+        </div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">Building in progress</p>
+      </div>
+    </div>
+  );
+}
+
+// A deliberately abstract, heavily-blurred "coming soon" teaser for the
+// presentation stage — never a real screenshot standing in as one (that's
+// exactly what this project's no-fabricated-screenshots guardrail
+// exists to prevent elsewhere); this is plain CSS shapes, honestly
+// presented as a teaser rather than real content.
+function BlurredPreview() {
+  return (
+    <div className="relative mt-5 overflow-hidden rounded-xl border border-ink/10 bg-paper-alt">
+      <div className="pointer-events-none select-none p-6 blur-md" aria-hidden="true">
+        <div className="h-3 w-2/3 rounded bg-brand-navy/30" />
+        <div className="mt-3 h-2 w-full rounded bg-ink/15" />
+        <div className="mt-2 h-2 w-5/6 rounded bg-ink/15" />
+        <div className="mt-4 h-20 w-full rounded-lg bg-brand-blue/20" />
+        <div className="mt-3 flex gap-2">
+          <div className="h-6 w-20 rounded-full bg-brand-blue/30" />
+          <div className="h-6 w-20 rounded-full bg-ink/10" />
+        </div>
+      </div>
+      <div className="absolute inset-0 flex items-center justify-center bg-white/40">
+        <p className="rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-brand-navy shadow-sm">
+          Sneak peek &mdash; we don't want to spoil the surprise!
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -104,8 +169,14 @@ export default function DashboardPage() {
       {stage === "building" && (
         <Card>
           <p className="text-sm font-semibold text-brand-blue">Building</p>
-          <h2 className="mt-1 text-xl font-bold text-brand-navy">We're building your website.</h2>
-          <p className="mt-2 text-sm text-ink/60">Nothing needed from you right now — we'll let you know when it's ready.</p>
+          <h2 className="mt-1 text-xl font-bold text-brand-navy">We are building your website.</h2>
+          <p className="mt-2 text-sm text-ink/60">
+            Average build time is 4&ndash;7 days. Once it's built, we'll present it to you.
+          </p>
+          <BuildingAnimation />
+          <div className="mt-5">
+            <SecondaryButton onClick={() => setChatOpen(true)}>Chat with Your Developer</SecondaryButton>
+          </div>
         </Card>
       )}
 
@@ -125,18 +196,25 @@ export default function DashboardPage() {
       {stage === "presentation" && (
         <Card>
           <p className="text-sm font-semibold text-brand-blue">Presentation</p>
-          <h2 className="mt-1 text-xl font-bold text-brand-navy">Your presentation is scheduled.</h2>
+          <h2 className="mt-1 text-xl font-bold text-brand-navy">Your website is ready!</h2>
           {me.presentation?.scheduledAt && (
-            <p className="mt-3 text-sm font-semibold text-brand-navy">{DAY_TIME_FORMATTER.format(new Date(me.presentation.scheduledAt))}</p>
+            <p className="mt-2 text-sm text-ink/60">
+              We've scheduled the presentation date on{" "}
+              <span className="font-semibold text-brand-navy">{DAY_TIME_FORMATTER.format(new Date(me.presentation.scheduledAt))}</span>.
+            </p>
           )}
-          {me.presentation?.meetingLink && (
+          {isPresentationToday(me.presentation?.scheduledAt) && me.presentation?.meetingLink ? (
             <p className="mt-1 text-sm">
               <a href={me.presentation.meetingLink} target="_blank" rel="noreferrer" className="text-brand-blue hover:underline">
                 Join the call &rarr;
               </a>
             </p>
+          ) : (
+            <p className="mt-1 text-sm text-ink/60">
+              We'll send you the meeting link via chat, or you'll see it here on the day of the presentation.
+            </p>
           )}
-          <p className="mt-2 text-sm text-ink/60">Reach out if anything changes.</p>
+          <BlurredPreview />
           <div className="mt-5">
             <SecondaryButton onClick={() => setChatOpen(true)}>Chat with Your Developer</SecondaryButton>
           </div>
@@ -161,7 +239,7 @@ export default function DashboardPage() {
             </>
           ) : (
             <>
-              <h2 className="mt-1 text-xl font-bold text-brand-navy">What's next?</h2>
+              <h2 className="mt-1 text-xl font-bold text-brand-navy">Your website is now live!</h2>
               <p className="mt-2 text-sm text-ink/60">We'll reach out with next steps shortly.</p>
               <div className="mt-5">
                 <SecondaryButton onClick={() => setChatOpen(true)}>Chat with Your Developer</SecondaryButton>
