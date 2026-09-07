@@ -48,27 +48,39 @@ export const onRequestGet: PagesFunction<Env, string, { clientId: string }> = as
     .bind(client.id)
     .first<{ id: string; stage: string; website_url: string | null }>();
 
-  let discovery: { externalStatus: string; scheduledAt: string | null } | null = null;
-  let presentation: { externalStatus: string; scheduledAt: string | null; clientDecision: string | null } | null = null;
+  let discovery: { externalStatus: string; scheduledAt: string | null; meetingLink: string | null } | null = null;
+  let presentation: {
+    externalStatus: string;
+    scheduledAt: string | null;
+    meetingLink: string | null;
+    clientDecision: string | null;
+  } | null = null;
   let offer: { type: string; status: string; content: unknown } | null = null;
 
   if (project) {
     const discoveryRow = await db
-      .prepare(`SELECT external_status, scheduled_at FROM discovery_sessions WHERE project_id = ? ORDER BY created_at DESC LIMIT 1`)
+      .prepare(`SELECT external_status, scheduled_at, meeting_link FROM discovery_sessions WHERE project_id = ? ORDER BY created_at DESC LIMIT 1`)
       .bind(project.id)
-      .first<{ external_status: string; scheduled_at: string | null }>();
-    if (discoveryRow) discovery = { externalStatus: discoveryRow.external_status, scheduledAt: discoveryRow.scheduled_at };
+      .first<{ external_status: string; scheduled_at: string | null; meeting_link: string | null }>();
+    if (discoveryRow) {
+      discovery = {
+        externalStatus: discoveryRow.external_status,
+        scheduledAt: discoveryRow.scheduled_at,
+        meetingLink: discoveryRow.meeting_link,
+      };
+    }
 
     const presentationRow = await db
       .prepare(
-        `SELECT external_status, scheduled_at, client_decision FROM presentations WHERE project_id = ? ORDER BY created_at DESC LIMIT 1`
+        `SELECT external_status, scheduled_at, meeting_link, client_decision FROM presentations WHERE project_id = ? ORDER BY created_at DESC LIMIT 1`
       )
       .bind(project.id)
-      .first<{ external_status: string; scheduled_at: string | null; client_decision: string | null }>();
+      .first<{ external_status: string; scheduled_at: string | null; meeting_link: string | null; client_decision: string | null }>();
     if (presentationRow) {
       presentation = {
         externalStatus: presentationRow.external_status,
         scheduledAt: presentationRow.scheduled_at,
+        meetingLink: presentationRow.meeting_link,
         clientDecision: presentationRow.client_decision,
       };
     }

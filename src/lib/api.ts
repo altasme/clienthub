@@ -25,8 +25,13 @@ export interface MeResponse {
     hasSeenWelcome: boolean;
   };
   project: { stage: Stage; websiteUrl: string | null } | null;
-  discovery: { externalStatus: string; scheduledAt: string | null } | null;
-  presentation: { externalStatus: string; scheduledAt: string | null; clientDecision: string | null } | null;
+  discovery: { externalStatus: string; scheduledAt: string | null; meetingLink: string | null } | null;
+  presentation: {
+    externalStatus: string;
+    scheduledAt: string | null;
+    meetingLink: string | null;
+    clientDecision: string | null;
+  } | null;
   offer: { type: string; status: string; content: Record<string, unknown> | null } | null;
 }
 
@@ -37,14 +42,24 @@ export async function fetchMe(): Promise<MeResponse | "unauthenticated"> {
   return (await res.json()) as MeResponse;
 }
 
-export async function submitSchedule(type: "discovery" | "presentation", preferredTimes: string[]): Promise<void> {
+export async function fetchAvailability(): Promise<string[]> {
+  const res = await fetch("/api/client/availability", { credentials: "same-origin" });
+  if (!res.ok) throw new Error("Failed to load available times.");
+  const data = (await res.json()) as { slots: string[] };
+  return data.slots;
+}
+
+export async function bookDiscoveryCall(startTime: string): Promise<void> {
   const res = await fetch("/api/client/schedule", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "same-origin",
-    body: JSON.stringify({ type, preferredTimes }),
+    body: JSON.stringify({ startTime }),
   });
-  if (!res.ok) throw new Error("Failed to submit your preferred times.");
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error((body as { error?: string } | null)?.error || "Failed to book that time.");
+  }
 }
 
 export async function updateProfile(fields: {

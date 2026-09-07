@@ -155,16 +155,20 @@ CREATE INDEX IF NOT EXISTS idx_stage_history_project_id ON stage_history(project
 -- Internal discovery fields + the client-visible external status; the
 -- client endpoint only ever returns external_status, never internal_notes
 -- (CLAUDE.md §6's "internal data is never returned by a client endpoint").
--- preferred_times holds the client's submitted call-request until the real
--- Altaventures booking system replaces this interim behavior (§11 open
--- item #2 — booking system spec not yet supplied).
+-- preferred_times is legacy from the interim call-request behavior this
+-- table originally shipped with (§11 open item #2) — kept, unused, rather
+-- than dropped, now that the real booking engine (functions/_lib/
+-- scheduling.ts, CLAUDE.md §10) writes scheduled_at directly instead.
+-- meeting_link is staff-set, client-visible (client.hasSeenWelcome-style
+-- exposure via /api/client/me) — never writable by the client themselves.
 CREATE TABLE IF NOT EXISTS discovery_sessions (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id),
   external_status TEXT NOT NULL DEFAULT 'requested' CHECK (external_status IN ('requested', 'scheduled', 'completed')),
   internal_notes TEXT,
-  preferred_times TEXT,               -- JSON array of client-submitted slots
+  preferred_times TEXT,               -- legacy, unused by the real booking engine
   scheduled_at TEXT,
+  meeting_link TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -176,14 +180,31 @@ CREATE TABLE IF NOT EXISTS presentations (
   project_id TEXT NOT NULL REFERENCES projects(id),
   external_status TEXT NOT NULL DEFAULT 'requested' CHECK (external_status IN ('requested', 'scheduled', 'completed')),
   internal_notes TEXT,
-  preferred_times TEXT,               -- JSON array of client-submitted slots
+  preferred_times TEXT,               -- legacy, unused by the real booking engine
   scheduled_at TEXT,
+  meeting_link TEXT,
   client_decision TEXT CHECK (client_decision IN ('pending', 'accepted', 'declined')),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_presentations_project_id ON presentations(project_id);
+
+-- The booking engine's source of truth for staff availability
+-- (CLAUDE.md §10): a recurring weekly template, not individual dates.
+-- start_time/end_time are "HH:MM" 24-hour, in Asia/Manila local time (the
+-- business's fixed timezone — no per-client conversion, no DST since the
+-- Philippines doesn't observe it). A day can have more than one rule (e.g.
+-- a lunch-break split into a morning and afternoon window).
+CREATE TABLE IF NOT EXISTS availability_rules (
+  id TEXT PRIMARY KEY,
+  day_of_week INTEGER NOT NULL CHECK (day_of_week BETWEEN 0 AND 6), -- 0=Sunday .. 6=Saturday
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_availability_rules_day ON availability_rules(day_of_week);
 
 -- Commercial offers. `content` is a JSON blob so offer copy/price is
 -- DB-configurable rather than hardcoded (CLAUDE.md §9) — ships with a

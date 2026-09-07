@@ -2,7 +2,16 @@ import { useState } from "react";
 import { useMe } from "../lib/MeContext";
 import ProgressRail from "../components/ProgressRail";
 import ChatModal from "../components/ChatModal";
-import ScheduleModal from "../components/ScheduleModal";
+import BookingModal from "../components/BookingModal";
+
+const DAY_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Manila",
+  weekday: "long",
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
 
 function Card({ children }: { children: React.ReactNode }) {
   return <div className="rounded-2xl border border-ink/10 bg-white p-6 sm:p-8">{children}</div>;
@@ -35,7 +44,7 @@ function SecondaryButton({ onClick, children }: { onClick: () => void; children:
 export default function DashboardPage() {
   const { me, refresh } = useMe();
   const [chatOpen, setChatOpen] = useState(false);
-  const [scheduleOpen, setScheduleOpen] = useState<"discovery" | "presentation" | null>(null);
+  const [bookingOpen, setBookingOpen] = useState(false);
 
   const stage = me.project?.stage;
 
@@ -73,15 +82,22 @@ export default function DashboardPage() {
           <p className="mt-2 text-sm text-ink/60">
             Let's learn more about your business so we can build something that actually works for you.
           </p>
-          <div className="mt-5 flex flex-wrap gap-3">
-            <PrimaryButton onClick={() => setScheduleOpen("discovery")}>Schedule a Call</PrimaryButton>
-            <SecondaryButton onClick={() => setChatOpen(true)}>Chat with Your Developer</SecondaryButton>
-          </div>
-          {me.discovery && (
-            <p className="mt-4 text-xs text-ink/40">
-              Status: {me.discovery.externalStatus === "requested" ? "Your call request is in" : me.discovery.externalStatus}.
+          {me.discovery?.scheduledAt && (
+            <p className="mt-3 text-sm font-semibold text-brand-navy">{DAY_TIME_FORMATTER.format(new Date(me.discovery.scheduledAt))}</p>
+          )}
+          {me.discovery?.meetingLink && (
+            <p className="mt-1 text-sm">
+              <a href={me.discovery.meetingLink} target="_blank" rel="noreferrer" className="text-brand-blue hover:underline">
+                Join the call &rarr;
+              </a>
             </p>
           )}
+          <div className="mt-5 flex flex-wrap gap-3">
+            <PrimaryButton onClick={() => setBookingOpen(true)}>
+              {me.discovery?.scheduledAt ? "Reschedule Call" : "Schedule a Call"}
+            </PrimaryButton>
+            <SecondaryButton onClick={() => setChatOpen(true)}>Chat with Your Developer</SecondaryButton>
+          </div>
         </Card>
       )}
 
@@ -97,15 +113,12 @@ export default function DashboardPage() {
         <Card>
           <p className="text-sm font-semibold text-brand-blue">Ready for Presentation</p>
           <h2 className="mt-1 text-xl font-bold text-brand-navy">Your website is ready.</h2>
-          <p className="mt-2 text-sm text-ink/60">Let's walk through it together.</p>
+          <p className="mt-2 text-sm text-ink/60">
+            We'll be in touch shortly to set a time to walk through it together.
+          </p>
           <div className="mt-5">
-            <PrimaryButton onClick={() => setScheduleOpen("presentation")}>Schedule Presentation</PrimaryButton>
+            <SecondaryButton onClick={() => setChatOpen(true)}>Chat with Your Developer</SecondaryButton>
           </div>
-          {me.presentation && (
-            <p className="mt-4 text-xs text-ink/40">
-              Status: {me.presentation.externalStatus === "requested" ? "Your preferred times are in" : me.presentation.externalStatus}.
-            </p>
-          )}
         </Card>
       )}
 
@@ -113,7 +126,17 @@ export default function DashboardPage() {
         <Card>
           <p className="text-sm font-semibold text-brand-blue">Presentation</p>
           <h2 className="mt-1 text-xl font-bold text-brand-navy">Your presentation is scheduled.</h2>
-          <p className="mt-2 text-sm text-ink/60">We'll see you then — reach out if anything changes.</p>
+          {me.presentation?.scheduledAt && (
+            <p className="mt-3 text-sm font-semibold text-brand-navy">{DAY_TIME_FORMATTER.format(new Date(me.presentation.scheduledAt))}</p>
+          )}
+          {me.presentation?.meetingLink && (
+            <p className="mt-1 text-sm">
+              <a href={me.presentation.meetingLink} target="_blank" rel="noreferrer" className="text-brand-blue hover:underline">
+                Join the call &rarr;
+              </a>
+            </p>
+          )}
+          <p className="mt-2 text-sm text-ink/60">Reach out if anything changes.</p>
           <div className="mt-5">
             <SecondaryButton onClick={() => setChatOpen(true)}>Chat with Your Developer</SecondaryButton>
           </div>
@@ -165,14 +188,12 @@ export default function DashboardPage() {
       )}
 
       <ChatModal open={chatOpen} onClose={() => setChatOpen(false)} />
-      {scheduleOpen && (
-        <ScheduleModal
-          open={!!scheduleOpen}
-          onClose={() => setScheduleOpen(null)}
-          type={scheduleOpen}
-          onSubmitted={refresh}
-        />
-      )}
+      <BookingModal
+        open={bookingOpen}
+        onClose={() => setBookingOpen(false)}
+        alreadyScheduledAt={me.discovery?.scheduledAt ?? null}
+        onBooked={refresh}
+      />
     </div>
   );
 }

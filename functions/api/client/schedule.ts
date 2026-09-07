@@ -1,12 +1,23 @@
 // Cloudflare Pages Function: POST /api/client/schedule
 //
-// "Schedule a Call" / "Schedule Presentation" — the interim booking
-// behavior (CLAUDE.md §1.6): logs the client's preferred times to
-// ClientKeeper as a task rather than integrating a real booking system,
-// which doesn't exist yet. Upserts the one discovery_sessions or
-// presentations row per project (the UI only ever shows the latest).
+// The real booking engine (CLAUDE.md §10) — replaces the old interim
+// "submit a few preferred times, staff calls you" behavior. Books (or
+// reschedules) the caller's own project's discovery call against the
+// shared weekly availability_rules. Presentation is deliberately not
+// bookable here at all: per the operator's explicit split, staff set that
+// date/time directly in ClientKeeper, not the client.
 //
-// Body: { type: "discovery" | "presentation", preferredTimes: string[] }
+// One endpoint handles both "first booking" and "reschedule" — if the
+// project already has a discovery_sessions row, this updates its
+// scheduled_at in place rather than creating a second row, which is
+// exactly the "can only schedule once, but can reschedule to a new future
+// time" rule: there is only ever one active booking per project, and this
+// is the one write path that ever changes it.
+//
+// Body: { startTime: string } (ISO instant, must land exactly on a real
+// generated slot).
+
+import { generateCandidateSlots, slotsConflict, type AvailabilityRule } from "../../_lib/scheduling";
 
 interface Env {
   DB?: D1Database;
@@ -26,19 +37,12 @@ export const onRequestPost: PagesFunction<Env, string, { clientId: string }> = a
   } catch {
     return jsonResponse(400, { error: "Invalid request body." });
   }
-
   const b = body as Record<string, unknown>;
-  const type = b.type;
-  const preferredTimes = Array.isArray(b.preferredTimes)
-    ? b.preferredTimes.filter((t): t is string => typeof t === "string" && t.trim().length > 0).slice(0, 5)
-    : [];
+  const startTime = typeof b.startTime === "string" ? b.startTime : null;
+  if (!startTime) return jsonResponse(400, { error: "startTime is required." });
 
-  if (type !== "discovery" && type !== "presentation") {
-    return jsonResponse(400, { error: "type must be 'discovery' or 'presentation'." });
-  }
-  if (preferredTimes.length === 0) {
-    return jsonResponse(400, { error: "At least one preferred time is required." });
-  }
+  const candidateMs = new Date(startTime).getTime();
+  if (Number.isNaN(candidateMs)) return jsonResponse(400, { error: "startTime is not a valid date." });
 
   const project = await db
     .prepare(`SELECT id FROM projects WHERE client_id = ? ORDER BY updated_at DESC LIMIT 1`)
@@ -46,49 +50,54 @@ export const onRequestPost: PagesFunction<Env, string, { clientId: string }> = a
     .first<{ id: string }>();
   if (!project) return jsonResponse(404, { error: "No project found." });
 
-  const now = new Date().toISOString();
-  const preferredTimesJson = JSON.stringify(preferredTimes);
+  const existing = await db
+    .prepare(`SELECT id, scheduled_at FROM discovery_sessions WHERE project_id = ? ORDER BY created_at DESC LIMIT 1`)
+    .bind(project.id)
+    .first<{ id: string; scheduled_at: string | null }>();
 
-  // Table name is never interpolated from input — two fully separate,
-  // hardcoded-table statements per branch, chosen only by the validated
-  // `type` above.
-  if (type === "discovery") {
-    const existing = await db
-      .prepare(`SELECT id FROM discovery_sessions WHERE project_id = ? ORDER BY created_at DESC LIMIT 1`)
-      .bind(project.id)
-      .first<{ id: string }>();
-    if (existing) {
-      await db
-        .prepare(`UPDATE discovery_sessions SET preferred_times = ?, updated_at = ? WHERE id = ?`)
-        .bind(preferredTimesJson, now, existing.id)
-        .run();
-    } else {
-      await db
-        .prepare(
-          `INSERT INTO discovery_sessions (id, project_id, external_status, preferred_times, created_at, updated_at) VALUES (?, ?, 'requested', ?, ?, ?)`
-        )
-        .bind(crypto.randomUUID(), project.id, preferredTimesJson, now, now)
-        .run();
-    }
-  } else {
-    const existing = await db
-      .prepare(`SELECT id FROM presentations WHERE project_id = ? ORDER BY created_at DESC LIMIT 1`)
-      .bind(project.id)
-      .first<{ id: string }>();
-    if (existing) {
-      await db
-        .prepare(`UPDATE presentations SET preferred_times = ?, updated_at = ? WHERE id = ?`)
-        .bind(preferredTimesJson, now, existing.id)
-        .run();
-    } else {
-      await db
-        .prepare(
-          `INSERT INTO presentations (id, project_id, external_status, preferred_times, created_at, updated_at) VALUES (?, ?, 'requested', ?, ?, ?)`
-        )
-        .bind(crypto.randomUUID(), project.id, preferredTimesJson, now, now)
-        .run();
-    }
+  // Re-validate server-side against the live rules + current bookings —
+  // never trust a client-supplied time just because it once appeared in a
+  // /api/client/availability response, since time has passed and another
+  // client may have taken it in the meantime.
+  const rulesResult = await db
+    .prepare(`SELECT day_of_week, start_time, end_time FROM availability_rules`)
+    .all<AvailabilityRule>();
+  const rules = rulesResult.results ?? [];
+  const now = new Date();
+  const validSlots = generateCandidateSlots(rules, now);
+  if (!validSlots.includes(candidateMs)) {
+    return jsonResponse(400, { error: "That time isn't a bookable slot. Please pick another." });
   }
 
-  return jsonResponse(200, { ok: true });
+  const bookedResult = await db
+    .prepare(
+      `SELECT scheduled_at FROM discovery_sessions WHERE external_status = 'scheduled' AND scheduled_at IS NOT NULL AND id != ?
+       UNION ALL
+       SELECT scheduled_at FROM presentations WHERE external_status = 'scheduled' AND scheduled_at IS NOT NULL`
+    )
+    .bind(existing?.id ?? "")
+    .all<{ scheduled_at: string }>();
+  const conflict = (bookedResult.results ?? []).some((r) => slotsConflict(candidateMs, new Date(r.scheduled_at).getTime()));
+  if (conflict) {
+    return jsonResponse(409, { error: "That slot was just taken. Please pick another." });
+  }
+
+  const now_iso = now.toISOString();
+  const scheduledAtIso = new Date(candidateMs).toISOString();
+
+  if (existing) {
+    await db
+      .prepare(`UPDATE discovery_sessions SET scheduled_at = ?, external_status = 'scheduled', updated_at = ? WHERE id = ?`)
+      .bind(scheduledAtIso, now_iso, existing.id)
+      .run();
+  } else {
+    await db
+      .prepare(
+        `INSERT INTO discovery_sessions (id, project_id, external_status, scheduled_at, created_at, updated_at) VALUES (?, ?, 'scheduled', ?, ?, ?)`
+      )
+      .bind(crypto.randomUUID(), project.id, scheduledAtIso, now_iso, now_iso)
+      .run();
+  }
+
+  return jsonResponse(200, { ok: true, scheduledAt: scheduledAtIso });
 };
