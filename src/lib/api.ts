@@ -13,6 +13,16 @@ export type Stage =
   | "cancelled"
   | "completed";
 
+export interface Subscription {
+  itemType: "plan" | "addon";
+  itemId: string;
+  itemName: string;
+  billingCycle: "one_time" | "annual" | "monthly";
+  amountPhp: number;
+  renewalAmountPhp: number | null;
+  nextRenewalDate: string | null;
+}
+
 export interface MeResponse {
   client: {
     email: string;
@@ -33,6 +43,8 @@ export interface MeResponse {
     clientDecision: string | null;
   } | null;
   offer: { type: string; status: string; content: Record<string, unknown> | null } | null;
+  pricingUnlocked: boolean;
+  subscriptions: Subscription[];
 }
 
 export async function fetchMe(): Promise<MeResponse | "unauthenticated"> {
@@ -76,6 +88,22 @@ export async function updateProfile(fields: {
     body: JSON.stringify(fields),
   });
   if (!res.ok) throw new Error("Failed to save your changes.");
+}
+
+export type RedirectKind = "url" | "qr-image" | "qr-payload" | "test-placeholder";
+
+export async function purchaseItem(itemId: string, isRenewal = false): Promise<{ redirectUrl: string; kind: RedirectKind }> {
+  const res = await fetch("/api/client/checkout-upsell", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ itemId, isRenewal }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error((body as { error?: string } | null)?.error || "We couldn't start your payment right now.");
+  }
+  return (await res.json()) as { redirectUrl: string; kind: RedirectKind };
 }
 
 export async function logout(): Promise<void> {

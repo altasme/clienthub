@@ -47,6 +47,11 @@ export default function Layout() {
             <NavLink to="/website" className={navLinkClass}>
               Website
             </NavLink>
+            {me.pricingUnlocked && (
+              <NavLink to="/pricing" className={navLinkClass}>
+                Pricing
+              </NavLink>
+            )}
             <NavLink to="/account" className={navLinkClass}>
               Account
             </NavLink>

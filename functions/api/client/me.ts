@@ -10,10 +10,24 @@
 // selected here at all — not filtered out after the fact, simply never
 // read, per CLAUDE.md §5's "internal data is never returned by a client
 // endpoint" rule.
+//
+// `pricingUnlocked` + `subscriptions` [2026-09-07]: the Pricing page and
+// the Account page's plan/renewal display both need to know the same two
+// things — whether the client is far enough along to see pricing at all,
+// and what they've already bought — so both are computed once here rather
+// than as separate endpoints. `pricingUnlocked` mirrors the same stage
+// gate functions/api/client/checkout-upsell.ts enforces server-side (this
+// copy is display-only; the checkout endpoint re-checks it independently,
+// so hiding the UI here is a convenience, not the actual security
+// boundary). `subscriptions` only ever returns 'active' rows.
+
+import { FORWARD_SEQUENCE, type Stage } from "../../_lib/stages";
 
 interface Env {
   DB?: D1Database;
 }
+
+const PRICING_GATE_STAGE: Stage = "post_presentation";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -102,6 +116,36 @@ export const onRequestGet: PagesFunction<Env, string, { clientId: string }> = as
     }
   }
 
+  const stageIndex = project ? FORWARD_SEQUENCE.indexOf(project.stage as (typeof FORWARD_SEQUENCE)[number]) : -1;
+  const gateIndex = FORWARD_SEQUENCE.indexOf(PRICING_GATE_STAGE);
+  const pricingUnlocked = project?.stage === "completed" || (stageIndex !== -1 && stageIndex >= gateIndex);
+
+  const subscriptionsResult = await db
+    .prepare(
+      `SELECT item_type, item_id, item_name, billing_cycle, amount_php, renewal_amount_php, next_renewal_date
+       FROM subscriptions WHERE client_id = ? AND status = 'active' ORDER BY item_type ASC, started_at DESC`
+    )
+    .bind(client.id)
+    .all<{
+      item_type: string;
+      item_id: string;
+      item_name: string;
+      billing_cycle: string;
+      amount_php: number;
+      renewal_amount_php: number | null;
+      next_renewal_date: string | null;
+    }>();
+
+  const subscriptions = (subscriptionsResult.results ?? []).map((row) => ({
+    itemType: row.item_type,
+    itemId: row.item_id,
+    itemName: row.item_name,
+    billingCycle: row.billing_cycle,
+    amountPhp: row.amount_php,
+    renewalAmountPhp: row.renewal_amount_php,
+    nextRenewalDate: row.next_renewal_date,
+  }));
+
   return jsonResponse(200, {
     client: {
       email: client.email,
@@ -117,5 +161,7 @@ export const onRequestGet: PagesFunction<Env, string, { clientId: string }> = as
     discovery,
     presentation,
     offer,
+    pricingUnlocked,
+    subscriptions,
   });
 };

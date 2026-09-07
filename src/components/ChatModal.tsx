@@ -3,9 +3,17 @@ import { whatsappUrl, viberUrl, messengerUrl } from "../lib/contact";
 
 const CHAT_PREFILL = "Hi Altaventures! I have a question about my project.";
 
-export default function ChatModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function ChatModal({
+  open,
+  onClose,
+  prefill,
+}: {
+  open: boolean;
+  onClose: () => void;
+  prefill?: string;
+}) {
   const channels = [
-    { label: "WhatsApp", href: whatsappUrl(CHAT_PREFILL) },
+    { label: "WhatsApp", href: whatsappUrl(prefill ?? CHAT_PREFILL) },
     { label: "Messenger", href: messengerUrl() },
     { label: "Viber", href: viberUrl() },
   ];

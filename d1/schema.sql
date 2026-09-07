@@ -240,6 +240,15 @@ CREATE INDEX IF NOT EXISTS idx_offer_events_offer_id ON offer_events(offer_id);
 -- idempotency key ganap.net echoes back, used to make webhook processing
 -- idempotent on retry (ganap's deliveries are at-least-once, same as the
 -- marketing site's existing integration).
+-- `source` distinguishes which ganap.net project a payment came from:
+-- 'foryourbusiness_299' (the public /foryourbusiness checkout, the only
+-- source until 2026-09-07) or 'internal_upsell' (the Pricing page's
+-- Digital Growth Plans checkout, CLAUDE.md's "Pricing page" section) — the
+-- two are separate ganap.net projects with separate signing secrets.
+-- Existing rows predate this column and are all 'foryourbusiness_299',
+-- which the DEFAULT below correctly backfills for a fresh database; an
+-- *already-deployed* database needs the manual migration documented in
+-- CLAUDE.md (this file's CREATE TABLE IF NOT EXISTS is a no-op against it).
 CREATE TABLE IF NOT EXISTS payments (
   id TEXT PRIMARY KEY,
   client_id TEXT REFERENCES clients(id),
@@ -248,23 +257,46 @@ CREATE TABLE IF NOT EXISTS payments (
   amount INTEGER NOT NULL,            -- whole pesos
   currency TEXT NOT NULL DEFAULT 'PHP',
   status TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'foryourbusiness_299' CHECK (source IN ('foryourbusiness_299', 'internal_upsell')),
   raw_payload TEXT,
   created_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_payments_client_id ON payments(client_id);
 
--- Recurring commercial state after Essential upsell (kept minimal in V1 —
--- no billing logic lives here yet, just enough to track that a client has
--- an active recurring plan once one exists).
+-- Real plan/add-on purchase tracking (CLAUDE.md's "Pricing page" section,
+-- 2026-09-07) — replaces the original placeholder shape (id/client_id/
+-- plan/status/started_at/ended_at only). A client can have several active
+-- rows at once (one plan + any number of standalone add-ons); `item_type`
+-- distinguishes the two so a new plan purchase can supersede the prior
+-- plan row without touching add-on rows.
+--
+-- next_renewal_date/renewal_amount_php are set regardless of billing_cycle
+-- — even a one_time row (Basic) can carry an ongoing renewal (its ₱750/yr
+-- domain fee), which is why these aren't folded into billing_cycle itself.
+-- Renewal is manual (Q2 decision, 2026-09-07): ganap.net's documented API
+-- is a one-time checkout session with no subscription/auto-charge
+-- endpoint, so nothing auto-bills — the client sees next_renewal_date on
+-- their Account page and clicks "Renew Now" to start a fresh checkout for
+-- renewal_amount_php when they're ready.
 CREATE TABLE IF NOT EXISTS subscriptions (
   id TEXT PRIMARY KEY,
   client_id TEXT NOT NULL REFERENCES clients(id),
-  plan TEXT NOT NULL,
+  plan TEXT NOT NULL,                 -- legacy label column, mirrors item_name
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled', 'past_due')),
   started_at TEXT NOT NULL,
-  ended_at TEXT
+  ended_at TEXT,
+  item_type TEXT NOT NULL DEFAULT 'plan' CHECK (item_type IN ('plan', 'addon')),
+  item_id TEXT NOT NULL DEFAULT '',   -- functions/_lib/pricing.ts catalog id
+  item_name TEXT NOT NULL DEFAULT '', -- display name snapshot at purchase time
+  billing_cycle TEXT NOT NULL DEFAULT 'one_time' CHECK (billing_cycle IN ('one_time', 'annual', 'monthly')),
+  amount_php INTEGER NOT NULL DEFAULT 0,   -- what was actually charged at purchase
+  renewal_amount_php INTEGER,              -- what a future "Renew Now" would charge
+  next_renewal_date TEXT,                  -- NULL if this item never renews
+  payment_id TEXT REFERENCES payments(id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_client_id ON subscriptions(client_id);
 
 -- Unified per-client timeline (CLAUDE.md §8's ClientKeeper activity view).
 CREATE TABLE IF NOT EXISTS client_activity (

@@ -80,3 +80,37 @@ export function paymentConfirmationEmail(params: {
 
   return { subject: `Payment Received — ${businessName || "Your Website"}`, html };
 }
+
+/**
+ * The email sent from the internal-upsell ganap.net webhook (Pricing
+ * page purchases, plans and add-ons alike) — distinct wording from
+ * paymentConfirmationEmail since these are existing, already-onboarded
+ * clients buying a specific catalog item, not a new payment kicking off
+ * the account-creation bridge.
+ */
+export function upsellPurchaseEmail(params: {
+  clientName: string;
+  businessName: string;
+  itemName: string;
+  amount: number;
+  currency: string;
+  renewalAmount: number | null;
+  nextRenewalDate: string | null;
+}): { subject: string; html: string } {
+  const { clientName, businessName, itemName, amount, currency, renewalAmount, nextRenewalDate } = params;
+  const greetingName = clientName || businessName || "there";
+
+  const renewalNote =
+    renewalAmount && nextRenewalDate
+      ? `<p style="margin-top: 16px; font-size: 14px; color: #667085;">This renews at &#8369;${renewalAmount} on ${escapeHtml(new Date(nextRenewalDate).toLocaleDateString())}. There's no auto-charge &mdash; we'll let you know when it's time, and you can renew from your Account page.</p>`
+      : "";
+
+  const html = `
+    <p>Hi ${escapeHtml(greetingName)},</p>
+    <p>We've received your payment of &#8369;${amount} ${escapeHtml(currency)} for <strong>${escapeHtml(itemName)}</strong>. Thanks for growing with Altaventures.</p>
+    ${renewalNote}
+    <p style="margin-top: 24px; font-size: 14px; color: #667085;">You can see this in your <a href="https://account.altasme.com/account">Altaventures dashboard</a> any time.</p>
+  `;
+
+  return { subject: `Purchase Confirmed — ${itemName}`, html };
+}
