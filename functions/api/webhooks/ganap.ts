@@ -32,18 +32,34 @@
 // checks `payments.external_reference` first and no-ops if that reference
 // has already been recorded.
 //
+// This webhook does NOT send a WorkOS invitation anymore [2026-09-07 fix].
+// It used to call sendInvitation() here, which made WorkOS email its own
+// accept_invitation_url immediately on payment — at the same moment the
+// marketing site's thank-you page showed its own "Create Your Account"
+// button. A real client hit both at once (one via email, one via the
+// button) and got confused about which was the actual way in. Per the
+// operator's explicit "only one way in" decision, the ONLY account-
+// creation entry point is now the thank-you page's button
+// (/api/auth-start?intent=signup); this webhook instead sends a payment-
+// confirmation email (functions/_lib/email.ts) with that same link as a
+// small footer notice, not a second race to complete signup.
+//
 // Required env vars: GANAP_SECRET (same signing secret as the
-// /foryourbusiness checkout project), WORKOS_API_KEY. Optional: DB — a
-// missing DB binding is a hard failure here (unlike the marketing site's
-// best-effort D1 writes), since this webhook's entire job is writing to
-// D1; there's nothing useful to do without it.
+// /foryourbusiness checkout project). Optional: DB — a missing DB binding
+// is a hard failure here (unlike the marketing site's best-effort D1
+// writes), since this webhook's entire job is writing to D1; there's
+// nothing useful to do without it. RESEND_API_KEY/RESEND_FROM_EMAIL are
+// best-effort — a missing pair just skips the confirmation email (logged),
+// since the client/project/payment rows already committed are the part
+// that actually matters.
 
 import { hmacSha256Hex, timingSafeEqual } from "../../_lib/crypto";
-import { sendInvitation } from "../../_lib/workos";
+import { sendEmail, paymentConfirmationEmail } from "../../_lib/email";
 
 interface Env {
   GANAP_SECRET: string;
-  WORKOS_API_KEY: string;
+  RESEND_API_KEY?: string;
+  RESEND_FROM_EMAIL?: string;
   DB?: D1Database;
 }
 
@@ -102,8 +118,8 @@ function metaString(metadata: Record<string, unknown> | null, key: string): stri
 }
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
-  if (!env.GANAP_SECRET || !env.WORKOS_API_KEY || !env.DB) {
-    console.error("ganap webhook: missing GANAP_SECRET, WORKOS_API_KEY, or DB binding");
+  if (!env.GANAP_SECRET || !env.DB) {
+    console.error("ganap webhook: missing GANAP_SECRET or DB binding");
     return new Response("Not configured", { status: 500 });
   }
 
@@ -210,25 +226,34 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     )
     .run();
 
-  // Only invite if this client has no linked WorkOS account yet — a
-  // returning client paying for a second project shouldn't get a second
-  // invitation to an account they already have.
-  const needsInvitation = !existingClient || (!existingClient.workos_user_id && existingClient.invitation_status !== "accepted");
-  if (needsInvitation) {
+  // Payment confirmation email — the only client-facing touch this
+  // webhook makes now. hasAccount decides the footer: a brand-new client
+  // (or one whose invitation was never accepted) gets the account-signup
+  // link; a returning client who already linked WorkOS gets a dashboard
+  // link instead, since re-showing "create your account" to someone who
+  // already has one would just recreate the exact confusion this fix is
+  // for.
+  const hasAccount = Boolean(existingClient?.workos_user_id);
+  if (env.RESEND_API_KEY && env.RESEND_FROM_EMAIL) {
     try {
-      const invitation = await sendInvitation(env.WORKOS_API_KEY, email);
-      await db
-        .prepare(`UPDATE clients SET workos_invitation_id = ?, invitation_status = 'pending', updated_at = ? WHERE id = ?`)
-        .bind(invitation.id, now, clientId)
-        .run();
+      const { subject, html } = paymentConfirmationEmail({
+        clientName: fullName,
+        businessName,
+        amount: payload.amount,
+        currency: payload.currency,
+        hasAccount,
+      });
+      await sendEmail({ RESEND_API_KEY: env.RESEND_API_KEY, RESEND_FROM_EMAIL: env.RESEND_FROM_EMAIL }, { to: email, subject, html });
     } catch (err) {
       // The client/project/payment rows are already committed — a failed
-      // invitation is recoverable via ClientKeeper's re-issue action, not
-      // a reason to fail the whole webhook (ganap.net would just retry
-      // delivery and hit the idempotency check above instead of inviting
-      // again).
-      console.error("ganap webhook: failed to send WorkOS invitation", err);
+      // email isn't a reason to fail the whole webhook (ganap.net would
+      // just retry delivery and hit the idempotency check above instead
+      // of re-sending). Staff can nudge the client manually via
+      // ClientKeeper's resend action if this happens.
+      console.error("ganap webhook: failed to send payment confirmation email", err);
     }
+  } else {
+    console.error("ganap webhook: RESEND_API_KEY/RESEND_FROM_EMAIL not configured; payment confirmation email not sent");
   }
 
   return new Response("ok", { status: 200 });
