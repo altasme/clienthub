@@ -25,7 +25,7 @@ export const onRequestGet: PagesFunction<Env, string, { clientId: string }> = as
 
   const client = await db
     .prepare(
-      `SELECT id, email, full_name, business_name, mobile, facebook, current_website, created_at
+      `SELECT id, email, full_name, business_name, mobile, facebook, current_website, created_at, welcome_dismissed_at
        FROM clients WHERE id = ?`
     )
     .bind(data.clientId)
@@ -38,6 +38,7 @@ export const onRequestGet: PagesFunction<Env, string, { clientId: string }> = as
       facebook: string | null;
       current_website: string | null;
       created_at: string;
+      welcome_dismissed_at: string | null;
     }>();
 
   if (!client) return jsonResponse(404, { error: "Client not found" });
@@ -98,6 +99,7 @@ export const onRequestGet: PagesFunction<Env, string, { clientId: string }> = as
       facebook: client.facebook,
       currentWebsite: client.current_website,
       createdAt: client.created_at,
+      hasSeenWelcome: Boolean(client.welcome_dismissed_at),
     },
     project: project ? { stage: project.stage, websiteUrl: project.website_url } : null,
     discovery,

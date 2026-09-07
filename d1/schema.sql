@@ -72,6 +72,13 @@ CREATE TABLE IF NOT EXISTS clients (
   -- invisible (CLAUDE.md §4's "Paid, no account yet" list + re-issue).
   workos_invitation_id TEXT,
   invitation_status TEXT NOT NULL DEFAULT 'pending' CHECK (invitation_status IN ('pending', 'accepted', 'expired', 'revoked')),
+  -- NULL until the client dismisses the first-login welcome modal
+  -- (functions/api/client/welcome-dismiss.ts); non-NULL means never show
+  -- it again. A fresh CREATE TABLE picks this up automatically, but the
+  -- live database needs a manual migration — see CLAUDE.md's note on this
+  -- column for the exact ALTER TABLE statement, since this file's
+  -- CREATE TABLE IF NOT EXISTS is a no-op against an existing table.
+  welcome_dismissed_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

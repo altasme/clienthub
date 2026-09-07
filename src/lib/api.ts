@@ -22,6 +22,7 @@ export interface MeResponse {
     facebook: string | null;
     currentWebsite: string | null;
     createdAt: string;
+    hasSeenWelcome: boolean;
   };
   project: { stage: Stage; websiteUrl: string | null } | null;
   discovery: { externalStatus: string; scheduledAt: string | null } | null;
@@ -64,4 +65,8 @@ export async function updateProfile(fields: {
 
 export async function logout(): Promise<void> {
   await fetch("/api/auth-logout", { method: "POST", credentials: "same-origin" });
+}
+
+export async function dismissWelcome(): Promise<void> {
+  await fetch("/api/client/welcome-dismiss", { method: "POST", credentials: "same-origin" });
 }

@@ -1,14 +1,35 @@
+import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { logout } from "../lib/api";
+import { logout, dismissWelcome } from "../lib/api";
+import { useMe } from "../lib/MeContext";
+import WelcomeModal from "./WelcomeModal";
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `text-sm font-semibold transition ${isActive ? "text-brand-blue" : "text-ink/60 hover:text-ink"}`;
 
 export default function Layout() {
+  const { me, refresh } = useMe();
+  // Optimistic local hide so the modal disappears instantly on dismiss
+  // rather than waiting on the refresh() round-trip; the real, durable
+  // state is still me.client.hasSeenWelcome from the server.
+  const [locallyDismissed, setLocallyDismissed] = useState(false);
+
   const handleLogout = () => {
     logout().finally(() => {
       window.location.href = "/";
     });
+  };
+
+  const handleDismissWelcome = () => {
+    setLocallyDismissed(true);
+    dismissWelcome()
+      .then(() => refresh())
+      .catch(() => {
+        // Best-effort: if this fails, the modal just reappears on the
+        // client's next login (welcome_dismissed_at never got set) —
+        // not worth blocking the UI over, since dismissing again is
+        // trivial.
+      });
   };
 
   return (
@@ -39,6 +60,8 @@ export default function Layout() {
       <main className="mx-auto max-w-4xl px-6 py-10">
         <Outlet />
       </main>
+
+      <WelcomeModal open={!me.client.hasSeenWelcome && !locallyDismissed} onDismiss={handleDismissWelcome} />
     </div>
   );
 }
