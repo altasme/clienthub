@@ -25,6 +25,14 @@
 
 export type BillingCycle = "one_time" | "annual" | "monthly";
 
+// Plan tiers [2026-09-07], for the "clients cannot downgrade themselves"
+// rule (checkout-upsell.ts enforces this server-side; the tier number here
+// is what both that check and PricingPage.tsx's button logic compare
+// against). Higher number = higher plan. Custom Development has no tier —
+// it's quote-only and never reachable through the tier comparison at all
+// (its purchasable:false already routes it to "Get a Quote" regardless).
+export const PLAN_TIERS: Record<string, number> = { starter: 0, basic: 1, essential: 2, business: 3 };
+
 export interface Plan {
   id: string;
   name: string;
@@ -67,10 +75,16 @@ export const PLANS: Plan[] = [
     id: "basic",
     name: "Basic",
     tagline: "Get your own professional website with your own domain.",
-    priceLabel: "₱1,500 one-time",
-    billing: "one_time",
+    // Basic changed from a ₱1,500 one-time build + a separate ₱750/yr
+    // domain-renewal line to a single ₱1,500/year plan that already
+    // includes (basic-domain) renewal [2026-09-07 correction]. A premium
+    // domain still costs more than a basic one — that's a quote, not a
+    // fixed number, so it's noted in copy rather than a second SKU.
+    priceLabel: "₱1,500/year",
+    billing: "annual",
     chargeNowPhp: 1500,
-    domainRenewalNote: "Domain renewal ₱750/year starting Year 2.",
+    annualPhp: 1500,
+    domainRenewalNote: "Includes domain renewal (basic domains). Premium domains subject to quote.",
     support: "Basic",
     included: ["Professional website (1 build)", "Basic .com domain", "Hosting & SSL", "Basic SEO"],
     notIncluded: ["Business systems / domain", "Admin panel", "Business email & notifications", "Continuous development", "Done-for-you updates"],
@@ -85,7 +99,7 @@ export const PLANS: Plan[] = [
     upfrontPhp: 1500,
     annualPhp: 4200,
     chargeNowPhp: 5700,
-    domainRenewalNote: "Domain renewal ₱750/year starting Year 2.",
+    domainRenewalNote: "Includes domain renewal (basic domains). Premium domains subject to quote.",
     support: "Standard",
     included: [
       "Professional website (1 build)",
@@ -110,7 +124,7 @@ export const PLANS: Plan[] = [
     upfrontPhp: 1500,
     annualPhp: 10000,
     chargeNowPhp: 11500,
-    domainRenewalNote: "Domain renewal ₱750/year starting Year 2.",
+    domainRenewalNote: "Includes domain renewal (basic domains). Premium domains subject to quote.",
     support: "Priority",
     included: [
       "Professional website (1 build)",

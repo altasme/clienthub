@@ -3,6 +3,7 @@ import { useMe } from "../lib/MeContext";
 import ProgressRail from "../components/ProgressRail";
 import ChatModal from "../components/ChatModal";
 import BookingModal from "../components/BookingModal";
+import { ensureAbsoluteUrl } from "../lib/url";
 
 const DAY_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   timeZone: "Asia/Manila",
@@ -222,7 +223,12 @@ export default function DashboardPage() {
           <h2 className="mt-1 text-xl font-bold text-brand-navy">Your website is now live!</h2>
           {me.project?.websiteUrl && (
             <p className="mt-2 text-sm">
-              <a href={me.project.websiteUrl} target="_blank" rel="noopener noreferrer" className="font-semibold text-brand-blue hover:underline">
+              <a
+                href={ensureAbsoluteUrl(me.project.websiteUrl)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-brand-blue hover:underline"
+              >
                 {me.project.websiteUrl}
               </a>
             </p>

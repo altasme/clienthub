@@ -20,7 +20,7 @@
 // hidden in the UI, per CLAUDE.md §5/§6's "every client endpoint enforces
 // its own access rules server-side" rule.
 
-import { findCatalogItem } from "../../_lib/pricing";
+import { findCatalogItem, PLAN_TIERS } from "../../_lib/pricing";
 import { FORWARD_SEQUENCE, type Stage } from "../../_lib/stages";
 
 interface Env {
@@ -96,6 +96,27 @@ export const onRequestPost: PagesFunction<Env, string, { clientId: string }> = a
     .bind(data.clientId)
     .first<{ id: string; email: string; full_name: string; business_name: string }>();
   if (!client) return jsonResponse(404, { error: "Client not found." });
+
+  // Clients cannot downgrade themselves — every client already starts on
+  // (at least) the Starter Plan, so a plan-to-plan move to a lower tier is
+  // only ever a downgrade, never a first purchase. Only staff can do this
+  // (ClientKeeper's set-plan endpoint, which bypasses this check entirely
+  // since it never calls this endpoint). Renewing your own current plan
+  // is never blocked — its tier always equals itself, never less than.
+  if (item.itemType === "plan" && item.id in PLAN_TIERS) {
+    const currentPlan = await db
+      .prepare(`SELECT item_id FROM subscriptions WHERE client_id = ? AND item_type = 'plan' AND status = 'active'`)
+      .bind(client.id)
+      .first<{ item_id: string }>();
+    const currentTier = currentPlan && currentPlan.item_id in PLAN_TIERS ? PLAN_TIERS[currentPlan.item_id] : -1;
+    if (PLAN_TIERS[item.id] < currentTier) {
+      // Deliberately generic wording — the UI never shows this plan as an
+      // option in the first place (PricingPage.tsx filters it out), so the
+      // only way to hit this is a direct API call; the message shouldn't
+      // name "downgrade" as a concept the client could push back on.
+      return jsonResponse(403, { error: "This plan isn't available for your account right now. Please message us if you have questions." });
+    }
+  }
 
   const project = await db
     .prepare(`SELECT stage FROM projects WHERE client_id = ? ORDER BY updated_at DESC LIMIT 1`)

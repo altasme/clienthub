@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMe } from "../lib/MeContext";
 import { purchaseItem } from "../lib/api";
-import { PLANS, PLANS_FOOTNOTE, PLAN_BADGES, ADDON_CATEGORIES, ADDONS_FOOTNOTE } from "../content/pricing";
+import { PLANS, PLAN_TIERS, PLANS_FOOTNOTE, PLAN_BADGES, ADDON_CATEGORIES, ADDONS_FOOTNOTE } from "../content/pricing";
 import ChatModal from "../components/ChatModal";
 
 function Check() {
@@ -31,6 +31,24 @@ export default function PricingPage() {
   const retry = new URLSearchParams(window.location.search).get("retry") === "1";
 
   const activeByItemId = new Map(me.subscriptions.map((s) => [s.itemId, s]));
+
+  // Every client already has an active plan (at least Starter, assigned
+  // automatically on signup — CLAUDE.md §13) — a move to a lower tier is
+  // therefore always a downgrade, never a first purchase, and clients
+  // can't self-serve that (only staff can, via ClientKeeper's plan
+  // override). Rather than show a disabled/"contact us" state that
+  // surfaces the concept of a downgrade at all, lower-tier plans are
+  // simply not rendered on this page for a client who has already moved
+  // past them — nothing to notice, nothing to ask about. This is a
+  // display choice only; checkout-upsell.ts is the real boundary and
+  // rejects a downgrade attempt server-side regardless of what's shown
+  // here.
+  const currentPlanId = me.subscriptions.find((s) => s.itemType === "plan")?.itemId;
+  const currentTier = currentPlanId && currentPlanId in PLAN_TIERS ? PLAN_TIERS[currentPlanId] : -1;
+  const visiblePlans = PLANS.filter((plan) => {
+    const tier = plan.id in PLAN_TIERS ? PLAN_TIERS[plan.id] : undefined;
+    return tier === undefined || tier >= currentTier;
+  });
 
   const handleBuy = async (itemId: string) => {
     setError(null);
@@ -100,7 +118,7 @@ export default function PricingPage() {
       </p>
 
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {PLANS.map((plan) => {
+        {visiblePlans.map((plan) => {
           const owned = activeByItemId.has(plan.id);
           return (
             <div

@@ -12,20 +12,28 @@
 // — add/rename one, update the other in the same change.
 //
 // `chargeNowPhp` is what THIS checkout call bills: for one-time items,
-// that's the flat price; for annual plans (Essential/Business), it's the
-// upfront fee plus the first year combined (matching the rate card's own
-// "Upfront Payment" + "/year" split shown as two numbers on one card).
-// `renewalPhp` is what a later "Renew Now" charges — undefined means the
-// item never renews. Every plan except Starter also carries an ongoing
-// ₱750/year domain-renewal cost from Year 2 (per the Basic/Essential/
-// Business rate-card slides); rather than track two separate renewal
-// concepts per client, Basic's own renewal IS that domain fee (its core
-// build is one-time), while Essential/Business's renewal is treated as one
-// all-in annual figure — a deliberate simplification of the source
-// material's own repetition, documented in CLAUDE.md.
+// that's the flat price; for annual plans, it's the upfront fee (if any)
+// plus the first year combined (matching the rate card's own "Upfront
+// Payment" + "/year" split shown as two numbers on one card). `renewalPhp`
+// is what a later "Renew Now" charges — undefined means the item never
+// renews.
+//
+// [2026-09-07 correction] Basic used to be a ₱1,500 one-time build plus a
+// separate ₱750/year domain-renewal line; the operator corrected this —
+// Basic is actually ₱1,500/year, already including (basic-domain)
+// renewal, same "renewal bundled into the plan fee" shape Essential/
+// Business already had. No plan has a standalone domain-renewal figure
+// anymore; a premium (non-basic) domain costs more, but that's a quote,
+// not a fixed number, so it isn't modeled as a catalog entry here.
+//
+// `tier` backs the "clients cannot downgrade themselves" rule
+// (checkout-upsell.ts) — higher number = higher plan. Add-ons have no
+// tier (the downgrade check only ever applies to itemType 'plan').
 
 export type BillingCycle = "one_time" | "annual" | "monthly";
 export type ItemType = "plan" | "addon";
+
+export const PLAN_TIERS: Record<string, number> = { starter: 0, basic: 1, essential: 2, business: 3 };
 
 export interface CatalogItem {
   id: string;
@@ -38,7 +46,7 @@ export interface CatalogItem {
 
 export const PRICING_CATALOG: CatalogItem[] = [
   { id: "starter", name: "Starter Plan", itemType: "plan", billing: "one_time", chargeNowPhp: 299 },
-  { id: "basic", name: "Basic Plan", itemType: "plan", billing: "one_time", chargeNowPhp: 1500, renewalPhp: 750 },
+  { id: "basic", name: "Basic Plan", itemType: "plan", billing: "annual", chargeNowPhp: 1500, renewalPhp: 1500 },
   { id: "essential", name: "Essential Plan", itemType: "plan", billing: "annual", chargeNowPhp: 5700, renewalPhp: 4200 },
   { id: "business", name: "Business Plan", itemType: "plan", billing: "annual", chargeNowPhp: 11500, renewalPhp: 10000 },
 

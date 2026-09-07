@@ -1,4 +1,5 @@
 import { useMe } from "../lib/MeContext";
+import { ensureAbsoluteUrl } from "../lib/url";
 
 const WEBSITE_STAGES: Record<string, { badge: string; headline: string; body: string }> = {
   payment_received: { badge: "Discovery", headline: "We're learning about your business.", body: "Once we understand your business, we'll start planning your website." },
@@ -26,7 +27,7 @@ export default function WebsitePage() {
             <h2 className="mt-1 text-xl font-bold text-brand-navy">Your website is live.</h2>
             {me.project?.websiteUrl ? (
               <a
-                href={me.project.websiteUrl}
+                href={ensureAbsoluteUrl(me.project.websiteUrl)}
                 target="_blank"
                 rel="noopener"
                 className="mt-4 inline-flex items-center justify-center rounded-full bg-brand-blue px-6 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-[#0b57cc]"
