@@ -242,13 +242,20 @@ CREATE INDEX IF NOT EXISTS idx_offer_events_offer_id ON offer_events(offer_id);
 -- marketing site's existing integration).
 -- `source` distinguishes which ganap.net project a payment came from:
 -- 'foryourbusiness_299' (the public /foryourbusiness checkout, the only
--- source until 2026-09-07) or 'internal_upsell' (the Pricing page's
--- Digital Growth Plans checkout, CLAUDE.md's "Pricing page" section) — the
--- two are separate ganap.net projects with separate signing secrets.
+-- source until 2026-09-07), 'internal_upsell' (the Pricing page's Digital
+-- Growth Plans checkout, CLAUDE.md's "Pricing page" section), or
+-- 'bill_of_service' (a staff-generated Bill of Service paid through the
+-- same alta_internal_upsell ganap.net project — see the `bills` table
+-- below and CLAUDE.md's Bill of Service section) — the two ganap.net
+-- projects have separate signing secrets, but bills share
+-- alta_internal_upsell's rather than needing a third project/secret.
 -- Existing rows predate this column and are all 'foryourbusiness_299',
 -- which the DEFAULT below correctly backfills for a fresh database; an
 -- *already-deployed* database needs the manual migration documented in
--- CLAUDE.md (this file's CREATE TABLE IF NOT EXISTS is a no-op against it).
+-- CLAUDE.md (this file's CREATE TABLE IF NOT EXISTS is a no-op against it,
+-- and a CHECK constraint change needs the table recreated — see CLAUDE.md
+-- for the exact migration SQL, both for the original 2-value CHECK and
+-- this 3-value one).
 CREATE TABLE IF NOT EXISTS payments (
   id TEXT PRIMARY KEY,
   client_id TEXT REFERENCES clients(id),
@@ -257,12 +264,68 @@ CREATE TABLE IF NOT EXISTS payments (
   amount INTEGER NOT NULL,            -- whole pesos
   currency TEXT NOT NULL DEFAULT 'PHP',
   status TEXT NOT NULL,
-  source TEXT NOT NULL DEFAULT 'foryourbusiness_299' CHECK (source IN ('foryourbusiness_299', 'internal_upsell')),
+  source TEXT NOT NULL DEFAULT 'foryourbusiness_299' CHECK (source IN ('foryourbusiness_299', 'internal_upsell', 'bill_of_service')),
   raw_payload TEXT,
   created_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_payments_client_id ON payments(client_id);
+
+-- Bill of Service: a staff-generated, one-off payment request with its own
+-- branded public page (CLAUDE.md's "Bill of Service" section). Created
+-- entirely in ClientKeeper (no ganap.net credentials needed for that —
+-- generating a bill is just a D1 write); the resulting `token` is the
+-- unguessable id in the public link ClientKeeper shows staff
+-- (https://account.altasme.com/bill/<token>) — deliberately NOT the
+-- human-readable `bill_number`, so a client can't guess adjacent bills by
+-- editing the URL. `client_id` is optional: a bill can be raised against
+-- an existing tracked client, but doesn't have to be (a brand-new
+-- prospect who hasn't been added as a client yet can still be billed;
+-- `recipient_name`/`recipient_email` carry the "To:" info independently
+-- either way). `client_type` is chosen fresh per bill, not stored on the
+-- `clients` row itself, since in principle the same client could
+-- conceivably be billed once personally and once through a company.
+-- `total_amount` is a stored snapshot (sum of `bill_line_items.amount` at
+-- creation time), not recomputed on read, so the number on an old bill
+-- never silently changes if line-item math logic changes later.
+CREATE TABLE IF NOT EXISTS bills (
+  id TEXT PRIMARY KEY,
+  bill_number TEXT NOT NULL UNIQUE,   -- e.g. "ALTAV-BOS-2026-002"
+  token TEXT NOT NULL UNIQUE,         -- unguessable id used in the public URL
+  client_id TEXT REFERENCES clients(id),
+  client_type TEXT NOT NULL CHECK (client_type IN ('individual', 'corporate')),
+  recipient_name TEXT NOT NULL,       -- individual: person's name. corporate: company name.
+  recipient_contact_person TEXT,      -- corporate only, optional ("Attn: ...")
+  recipient_tin TEXT,                 -- corporate only, optional — the client's own TIN, not Altaventures'
+  recipient_email TEXT,
+  scope_description TEXT,             -- optional narrative shown above the line items
+  currency TEXT NOT NULL DEFAULT 'PHP',
+  total_amount INTEGER NOT NULL,      -- whole pesos, snapshot of line items at creation
+  validity_days INTEGER NOT NULL DEFAULT 7,
+  issue_date TEXT NOT NULL,           -- "YYYY-MM-DD", for display
+  expires_at TEXT NOT NULL,           -- full ISO timestamp: created_at + validity_days
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'expired', 'cancelled')),
+  notes TEXT,                         -- optional freeform terms/instructions
+  paid_at TEXT,
+  payment_id TEXT REFERENCES payments(id),
+  created_by TEXT NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_bills_token ON bills(token);
+CREATE INDEX IF NOT EXISTS idx_bills_client_id ON bills(client_id);
+
+CREATE TABLE IF NOT EXISTS bill_line_items (
+  id TEXT PRIMARY KEY,
+  bill_id TEXT NOT NULL REFERENCES bills(id),
+  description TEXT NOT NULL,
+  amount INTEGER NOT NULL,            -- whole pesos
+  sort_order INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_bill_line_items_bill_id ON bill_line_items(bill_id);
 
 -- Real plan/add-on purchase tracking (CLAUDE.md's "Pricing page" section,
 -- 2026-09-07) — replaces the original placeholder shape (id/client_id/

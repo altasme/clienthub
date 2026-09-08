@@ -125,6 +125,49 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     }
   }
 
+  // Bill of Service payments (functions/api/public/bill/[token]/checkout.ts)
+  // ride this same ganap.net project/webhook but aren't a catalog item —
+  // handled entirely separately and returned early, before the
+  // clientId/itemId catalog-lookup path below.
+  if (metaString(payload.metadata, "kind") === "bill_of_service") {
+    const billId = metaString(payload.metadata, "billId");
+    if (!billId) {
+      console.error("internal-upsell webhook: bill_of_service payload missing billId in metadata, cannot process", rawBody);
+      return new Response("ok", { status: 200 });
+    }
+
+    const bill = await db.prepare(`SELECT id, client_id, status FROM bills WHERE id = ?`).bind(billId).first<{ id: string; client_id: string | null; status: string }>();
+    if (!bill) {
+      console.error(`internal-upsell webhook: no bill found for billId ${billId}`, rawBody);
+      return new Response("ok", { status: 200 });
+    }
+    if (bill.status === "paid") {
+      console.log(`internal-upsell webhook: bill ${billId} already marked paid, skipping`);
+      return new Response("ok", { status: 200 });
+    }
+
+    const now = new Date().toISOString();
+    const paymentId = crypto.randomUUID();
+    await db
+      .prepare(
+        `INSERT INTO payments (id, client_id, ganap_reference_number, external_reference, amount, currency, status, source, raw_payload, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'bill_of_service', ?, ?)`
+      )
+      .bind(paymentId, bill.client_id, payload.referenceNumber, payload.externalReference, payload.amount, payload.currency, payload.status, rawBody, now)
+      .run();
+
+    await db.prepare(`UPDATE bills SET status = 'paid', paid_at = ?, payment_id = ?, updated_at = ? WHERE id = ?`).bind(now, paymentId, now, bill.id).run();
+
+    if (bill.client_id) {
+      await db
+        .prepare(`INSERT INTO client_activity (id, client_id, type, description, actor_id, created_at) VALUES (?, ?, 'bill_paid', ?, NULL, ?)`)
+        .bind(crypto.randomUUID(), bill.client_id, `Bill of Service paid (₱${payload.amount})`, now)
+        .run();
+    }
+
+    return new Response("ok", { status: 200 });
+  }
+
   const clientId = metaString(payload.metadata, "clientId");
   const itemId = metaString(payload.metadata, "itemId");
   if (!clientId || !itemId) {

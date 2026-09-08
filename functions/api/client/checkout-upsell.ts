@@ -22,6 +22,7 @@
 
 import { findCatalogItem, PLAN_TIERS } from "../../_lib/pricing";
 import { FORWARD_SEQUENCE, type Stage } from "../../_lib/stages";
+import { startGanapCheckout } from "../../_lib/ganap";
 
 interface Env {
   GANAP_INTERNAL_UPSELL_SECRET: string;
@@ -29,28 +30,8 @@ interface Env {
   DB?: D1Database;
 }
 
-const GANAP_CHECKOUT_URL = "https://convex-top-api.ganap.net/v1/checkout";
 const SUCCESS_REDIRECT_URL = "https://account.altasme.com/pricing";
 const FAILURE_REDIRECT_URL = "https://account.altasme.com/pricing?retry=1";
-
-type RedirectKind = "url" | "qr-image" | "qr-payload" | "test-placeholder";
-const TEST_PLACEHOLDER_PATTERN = /^ganap-test-do-not-pay:/i;
-
-function classifyRedirectUrl(value: string): RedirectKind {
-  if (TEST_PLACEHOLDER_PATTERN.test(value)) return "test-placeholder";
-  if (/^https?:\/\//i.test(value)) return "url";
-  if (/^data:image/i.test(value) || /\.(png|jpe?g|gif|webp|svg)$/i.test(value)) return "qr-image";
-  return "qr-payload";
-}
-
-async function hmacSha256Hex(secret: string, message: string): Promise<string> {
-  const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const signature = await crypto.subtle.sign("HMAC", key, enc.encode(message));
-  return Array.from(new Uint8Array(signature))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -132,10 +113,8 @@ export const onRequestPost: PagesFunction<Env, string, { clientId: string }> = a
 
   const idempotencyKey = crypto.randomUUID();
 
-  const ganapBody = JSON.stringify({
-    projectUuid: env.GANAP_INTERNAL_UPSELL_PROJECT_UUID,
+  const result = await startGanapCheckout(env.GANAP_INTERNAL_UPSELL_SECRET, env.GANAP_INTERNAL_UPSELL_PROJECT_UUID, {
     amount: amountPhp,
-    idempotencyKey,
     customerName: client.full_name,
     customerEmail: client.email,
     externalReference: idempotencyKey,
@@ -152,42 +131,7 @@ export const onRequestPost: PagesFunction<Env, string, { clientId: string }> = a
     failureRedirectUrl: FAILURE_REDIRECT_URL,
   });
 
-  const signature = await hmacSha256Hex(env.GANAP_INTERNAL_UPSELL_SECRET, ganapBody);
+  if (!result.ok) return jsonResponse(result.status, { error: result.error });
 
-  let ganapResponse: Response;
-  try {
-    ganapResponse = await fetch(GANAP_CHECKOUT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Ganap-Signature": signature },
-      body: ganapBody,
-    });
-  } catch (err) {
-    console.error("internal-upsell checkout: ganap.net request failed", err);
-    return jsonResponse(502, { error: "We couldn't start your payment right now. Please try again shortly." });
-  }
-
-  const ganapResponseText = await ganapResponse.text().catch(() => "");
-  console.log(`internal-upsell checkout: ganap.net response (${ganapResponse.status}):`, ganapResponseText);
-
-  if (!ganapResponse.ok) {
-    return jsonResponse(502, { error: "We couldn't start your payment right now. Please try again shortly." });
-  }
-
-  let ganapData: { referenceNumber?: string; redirectUrl?: string } | null;
-  try {
-    ganapData = JSON.parse(ganapResponseText) as { referenceNumber?: string; redirectUrl?: string };
-  } catch {
-    ganapData = null;
-  }
-
-  if (!ganapData?.redirectUrl || !ganapData.referenceNumber) {
-    console.error("internal-upsell checkout: response missing redirectUrl/referenceNumber", ganapResponseText);
-    return jsonResponse(502, { error: "We couldn't start your payment right now. Please try again shortly." });
-  }
-
-  return jsonResponse(200, {
-    redirectUrl: ganapData.redirectUrl,
-    referenceNumber: ganapData.referenceNumber,
-    kind: classifyRedirectUrl(ganapData.redirectUrl),
-  });
+  return jsonResponse(200, { redirectUrl: result.redirectUrl, referenceNumber: result.referenceNumber, kind: result.kind });
 };
