@@ -3,13 +3,19 @@
 // Starts a ganap.net checkout for one Pricing-page item (a Digital Growth
 // Plan or a standalone add-on). Body: { itemId: string }.
 //
-// This is a SEPARATE ganap.net project from the /foryourbusiness ₱299
-// checkout (alta_internal_upsell vs the original project) — its own
-// signing secret and project UUID, its own webhook
-// (functions/api/webhooks/internal-upsell.ts). Same request-signing shape
-// as the marketing site's functions/api/checkout.ts and this app's
-// existing functions/api/webhooks/ganap.ts, confirmed against the vendor
-// docs supplied for this project specifically (Internal_Upsell.txt).
+// Consolidated onto the single shared ganap.net project [2026-09-09] — this
+// used to run through a separate alta_internal_upsell project/secret with
+// its own webhook (functions/api/webhooks/internal-upsell.ts), but ganap's
+// checkout API takes amount/redirects/metadata per request rather than
+// tying them to a project, so there was no functional reason to keep two
+// projects around. Now shares GANAP_SECRET/GANAP_PROJECT_UUID with the
+// /foryourbusiness ₱299 checkout and the Bill of Service checkout, and its
+// webhook is handled by the merged functions/api/webhooks/ganap.ts
+// (branches on metadata.clientId/itemId vs metadata.kind ===
+// "bill_of_service" vs neither). See that file's header comment for the
+// full routing logic and CLAUDE.md's consolidation note for the operator
+// steps this required (retiring the old project + one shared secret pair
+// across both Cloudflare Pages projects).
 //
 // The amount charged is looked up server-side from
 // functions/_lib/pricing.ts — never trusted from the request body, same
@@ -25,8 +31,8 @@ import { FORWARD_SEQUENCE, type Stage } from "../../_lib/stages";
 import { startGanapCheckout } from "../../_lib/ganap";
 
 interface Env {
-  GANAP_INTERNAL_UPSELL_SECRET: string;
-  GANAP_INTERNAL_UPSELL_PROJECT_UUID: string;
+  GANAP_SECRET: string;
+  GANAP_PROJECT_UUID: string;
   DB?: D1Database;
 }
 
@@ -40,10 +46,10 @@ function jsonResponse(status: number, body: unknown): Response {
 const PRICING_GATE_STAGE: Stage = "post_presentation";
 
 export const onRequestPost: PagesFunction<Env, string, { clientId: string }> = async ({ request, env, data }) => {
-  if (!env.GANAP_INTERNAL_UPSELL_SECRET || !env.GANAP_INTERNAL_UPSELL_PROJECT_UUID || !env.DB) {
+  if (!env.GANAP_SECRET || !env.GANAP_PROJECT_UUID || !env.DB) {
     const missing = [
-      !env.GANAP_INTERNAL_UPSELL_SECRET && "GANAP_INTERNAL_UPSELL_SECRET",
-      !env.GANAP_INTERNAL_UPSELL_PROJECT_UUID && "GANAP_INTERNAL_UPSELL_PROJECT_UUID",
+      !env.GANAP_SECRET && "GANAP_SECRET",
+      !env.GANAP_PROJECT_UUID && "GANAP_PROJECT_UUID",
       !env.DB && "DB binding",
     ].filter(Boolean);
     console.error(`checkout-upsell: not configured, missing: ${missing.join(", ")}`);
@@ -113,7 +119,7 @@ export const onRequestPost: PagesFunction<Env, string, { clientId: string }> = a
 
   const idempotencyKey = crypto.randomUUID();
 
-  const result = await startGanapCheckout(env.GANAP_INTERNAL_UPSELL_SECRET, env.GANAP_INTERNAL_UPSELL_PROJECT_UUID, {
+  const result = await startGanapCheckout(env.GANAP_SECRET, env.GANAP_PROJECT_UUID, {
     amount: amountPhp,
     customerName: client.full_name,
     customerEmail: client.email,

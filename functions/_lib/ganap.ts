@@ -1,9 +1,10 @@
 // Shared ganap.net checkout helpers, factored out of
-// functions/api/client/checkout-upsell.ts so the new Bill of Service
-// checkout (functions/api/public/bill/[token]/checkout.ts) can reuse the
-// exact same request-signing/response-classification logic against the
-// same alta_internal_upsell ganap.net project, rather than a third copy of
-// this code.
+// functions/api/client/checkout-upsell.ts so the Bill of Service checkout
+// (functions/api/public/bill/[token]/checkout.ts) can reuse the exact same
+// request-signing/response-classification logic. All three checkout call
+// sites in this app now share the single consolidated ganap.net project
+// (GANAP_SECRET/GANAP_PROJECT_UUID — see functions/api/webhooks/ganap.ts
+// for the 2026-09-09 consolidation note).
 
 import { hmacSha256Hex } from "./crypto";
 

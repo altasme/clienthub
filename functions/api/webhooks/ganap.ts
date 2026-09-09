@@ -1,11 +1,39 @@
 // Cloudflare Pages Function: POST /api/webhooks/ganap
 //
-// The account-creation bridge's entry point (CLAUDE.md §0/§1.2/§1.5). This
-// app owns the ganap.net webhook for the /foryourbusiness ₱299 project —
-// once this is deployed, repoint that project's webhook URL (currently
-// https://altasme.com/testpayment, in the marketing site repo) here, so
-// this app's clients/projects/payments tables become the live source of
-// truth "from payment_received onward" per the spec.
+// The single ganap.net webhook for the whole ecosystem [consolidated
+// 2026-09-09]. Previously there were two separate ganap.net projects with
+// two separate webhook handlers here (this file for the /foryourbusiness
+// ₱299 project, functions/api/webhooks/internal-upsell.ts for a second
+// alta_internal_upsell project covering Pricing-page upsells and Bill of
+// Service). Collapsed to one project/one secret since ganap's checkout API
+// takes amount/redirects/metadata per request rather than tying them to a
+// project — there was no functional reason two projects existed, only
+// historical accretion (the upsell project was added later, then Bill of
+// Service just reused it rather than adding a third). This is now the ONE
+// webhook URL configured on the ONE remaining ganap.net project's
+// dashboard; the old alta_internal_upsell project should be retired there
+// once this ships, and GANAP_INTERNAL_UPSELL_SECRET/
+// GANAP_INTERNAL_UPSELL_PROJECT_UUID removed from this app's Cloudflare
+// Pages environment variables (they're no longer read anywhere).
+//
+// Routing: every checkout that starts a payment now tags its own kind in
+// `metadata`, so this handler branches on that rather than needing three
+// separate webhook URLs:
+//   - metadata.kind === "bill_of_service"          -> bill flow
+//   - metadata.clientId && metadata.itemId present  -> internal-upsell/
+//                                                       catalog-item flow
+//   - neither of the above                          -> /foryourbusiness
+//                                                       ₱299 signup flow
+//                                                       (the original,
+//                                                       untagged shape —
+//                                                       kept untagged
+//                                                       deliberately so the
+//                                                       marketing site's
+//                                                       functions/api/
+//                                                       checkout.ts didn't
+//                                                       need a matching
+//                                                       edit for this
+//                                                       consolidation)
 //
 // Payload shape and signing match the marketing site's already-confirmed
 // real ganap.net contract (functions/testpayment.ts there, verified
@@ -20,51 +48,40 @@
 //     "currency": "PHP",
 //     "status": "paid",
 //     "customer": { "name": "...", "email": "..." } | null,
-//     "metadata": { businessName, phone, facebook, instagram,
-//                   existingWebsite, offer } | null,
+//     "metadata": { ... } | null,        // shape depends on which checkout
+//                                         // started the payment, see above
 //     "timestamp": "..."
 //   }
 //
-// Idempotency: unlike the marketing site's webhook (which only sends a
-// notification email on every delivery), this handler creates real
-// clients/projects/payments rows — reprocessing a retried delivery would
-// create a duplicate client and project, not just a duplicate email. This
-// checks `payments.external_reference` first and no-ops if that reference
-// has already been recorded.
+// Idempotency: every branch checks `payments.external_reference` first and
+// no-ops if that reference has already been recorded — reprocessing a
+// retried delivery on the signup flow would create a duplicate client and
+// project, not just a duplicate email.
 //
-// This webhook does NOT send a WorkOS invitation anymore [2026-09-07 fix].
-// It used to call sendInvitation() here, which made WorkOS email its own
-// accept_invitation_url immediately on payment — at the same moment the
-// marketing site's thank-you page showed its own "Create Your Account"
-// button. A real client hit both at once (one via email, one via the
-// button) and got confused about which was the actual way in. Per the
-// operator's explicit "only one way in" decision, the ONLY account-
-// creation entry point is now the thank-you page's button
-// (/api/auth-start?intent=signup); this webhook instead sends a payment-
-// confirmation email (functions/_lib/email.ts) with that same link as a
-// small footer notice, not a second race to complete signup.
+// This webhook does NOT send a WorkOS invitation on the signup flow
+// [2026-09-07 fix, unchanged by this consolidation]. See the git history
+// on this file for the original explanation: the only account-creation
+// entry point is the thank-you page's button (/api/auth-start?intent=
+// signup); this webhook sends a payment-confirmation email instead.
 //
-// Required env vars: GANAP_SECRET (same signing secret as the
-// /foryourbusiness checkout project). Optional: DB — a missing DB binding
-// is a hard failure here (unlike the marketing site's best-effort D1
-// writes), since this webhook's entire job is writing to D1; there's
-// nothing useful to do without it. RESEND_API_KEY/RESEND_FROM_EMAIL are
-// best-effort — a missing pair just skips the confirmation email (logged),
-// since the client/project/payment rows already committed are the part
-// that actually matters.
+// Required env vars: GANAP_SECRET (the one shared signing secret, used by
+// every checkout in this app and the marketing site's /foryourbusiness
+// checkout — all three must be configured with the SAME ganap.net
+// project's secret across both Cloudflare Pages projects for signatures to
+// verify). Optional: DB — a missing DB binding is a hard failure here
+// (unlike the marketing site's best-effort D1 writes), since this
+// webhook's entire job is writing to D1; there's nothing useful to do
+// without it. RESEND_API_KEY/RESEND_FROM_EMAIL are best-effort — a missing
+// pair just skips confirmation emails (logged), since the rows already
+// committed are the part that actually matters.
 //
-// Auto-assigns the Starter Plan [2026-09-07]: a brand-new client (never
-// seen this email before) gets an active `subscriptions` row for
-// "starter" (functions/_lib/pricing.ts, ₱299), so the Account page's
-// "Your Plan" card and ClientKeeper's client view have something to show
-// from day one, not just after a Digital Growth Plans purchase. Staff can
-// override this from ClientKeeper (functions/api/app/clients/[id]/
-// set-plan.ts there). A returning client (an existing row matched by
-// email) does NOT get this — a second ₱299 payment for a second project
-// shouldn't silently reset whatever plan they've already been set to.
+// Auto-assigns the Starter Plan on the signup flow only [2026-09-07,
+// unchanged]: a brand-new client (never seen this email before) gets an
+// active `subscriptions` row for "starter" (functions/_lib/pricing.ts,
+// ₱299). A returning client (matched by email) does NOT get this.
 
 import { hmacSha256Hex, timingSafeEqual } from "../../_lib/crypto";
-import { sendEmail, paymentConfirmationEmail } from "../../_lib/email";
+import { sendEmail, paymentConfirmationEmail, upsellPurchaseEmail } from "../../_lib/email";
 import { findCatalogItem } from "../../_lib/pricing";
 
 interface Env {
@@ -128,48 +145,159 @@ function metaString(metadata: Record<string, unknown> | null, key: string): stri
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
-  if (!env.GANAP_SECRET || !env.DB) {
-    console.error("ganap webhook: missing GANAP_SECRET or DB binding");
-    return new Response("Not configured", { status: 500 });
+function addInterval(fromIso: string, cycle: "one_time" | "annual" | "monthly"): string | null {
+  const d = new Date(fromIso);
+  if (cycle === "monthly") {
+    d.setUTCMonth(d.getUTCMonth() + 1);
+    return d.toISOString();
   }
+  // 'one_time' items can still carry a renewal (Basic's domain fee) on a
+  // yearly cadence, same as 'annual' billing — both step forward one year.
+  d.setUTCFullYear(d.getUTCFullYear() + 1);
+  return d.toISOString();
+}
 
-  const rawBody = await request.text();
-  const signature = request.headers.get(SIGNATURE_HEADER) || "";
-
-  const expectedSignature = await hmacSha256Hex(env.GANAP_SECRET, rawBody);
-  if (!signature || !timingSafeEqual(signature, expectedSignature)) {
-    console.error("ganap webhook: signature mismatch, rejecting");
-    return new Response("Invalid signature", { status: 401 });
-  }
-
-  const payload = parsePayload(rawBody);
-  if (!payload) {
-    console.error("ganap webhook: body is not valid JSON or missing required fields", rawBody);
-    return new Response("Invalid body", { status: 400 });
-  }
-
-  if (payload.event !== "transaction.paid") {
-    console.log(`ganap webhook: ignoring event "${payload.event}"`);
+async function handleBillOfService(db: D1Database, payload: GanapWebhookPayload, rawBody: string): Promise<Response> {
+  const billId = metaString(payload.metadata, "billId");
+  if (!billId) {
+    console.error("ganap webhook (bill_of_service): payload missing billId in metadata, cannot process", rawBody);
     return new Response("ok", { status: 200 });
   }
 
-  const db = env.DB;
-
-  if (payload.externalReference) {
-    const existing = await db
-      .prepare(`SELECT id FROM payments WHERE external_reference = ?`)
-      .bind(payload.externalReference)
-      .first<{ id: string }>();
-    if (existing) {
-      console.log(`ganap webhook: externalReference ${payload.externalReference} already processed, skipping`);
-      return new Response("ok", { status: 200 });
-    }
+  const bill = await db.prepare(`SELECT id, client_id, status FROM bills WHERE id = ?`).bind(billId).first<{ id: string; client_id: string | null; status: string }>();
+  if (!bill) {
+    console.error(`ganap webhook (bill_of_service): no bill found for billId ${billId}`, rawBody);
+    return new Response("ok", { status: 200 });
+  }
+  if (bill.status === "paid") {
+    console.log(`ganap webhook (bill_of_service): bill ${billId} already marked paid, skipping`);
+    return new Response("ok", { status: 200 });
   }
 
+  const now = new Date().toISOString();
+  const paymentId = crypto.randomUUID();
+  await db
+    .prepare(
+      `INSERT INTO payments (id, client_id, ganap_reference_number, external_reference, amount, currency, status, source, raw_payload, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'bill_of_service', ?, ?)`
+    )
+    .bind(paymentId, bill.client_id, payload.referenceNumber, payload.externalReference, payload.amount, payload.currency, payload.status, rawBody, now)
+    .run();
+
+  await db.prepare(`UPDATE bills SET status = 'paid', paid_at = ?, payment_id = ?, updated_at = ? WHERE id = ?`).bind(now, paymentId, now, bill.id).run();
+
+  if (bill.client_id) {
+    await db
+      .prepare(`INSERT INTO client_activity (id, client_id, type, description, actor_id, created_at) VALUES (?, ?, 'bill_paid', ?, NULL, ?)`)
+      .bind(crypto.randomUUID(), bill.client_id, `Bill of Service paid (₱${payload.amount})`, now)
+      .run();
+  }
+
+  return new Response("ok", { status: 200 });
+}
+
+async function handleInternalUpsell(
+  db: D1Database,
+  payload: GanapWebhookPayload,
+  rawBody: string,
+  env: Env
+): Promise<Response> {
+  const clientId = metaString(payload.metadata, "clientId");
+  const itemId = metaString(payload.metadata, "itemId");
+  if (!clientId || !itemId) {
+    console.error("ganap webhook (internal_upsell): payload missing clientId/itemId in metadata, cannot process", rawBody);
+    return new Response("ok", { status: 200 });
+  }
+
+  const catalogItem = findCatalogItem(itemId);
+  if (!catalogItem) {
+    console.error(`ganap webhook (internal_upsell): unknown itemId "${itemId}", cannot process`, rawBody);
+    return new Response("ok", { status: 200 });
+  }
+
+  const client = await db
+    .prepare(`SELECT id, email, full_name, business_name FROM clients WHERE id = ?`)
+    .bind(clientId)
+    .first<{ id: string; email: string; full_name: string; business_name: string }>();
+  if (!client) {
+    console.error(`ganap webhook (internal_upsell): no client found for clientId ${clientId}`, rawBody);
+    return new Response("ok", { status: 200 });
+  }
+
+  const now = new Date().toISOString();
+
+  const paymentId = crypto.randomUUID();
+  await db
+    .prepare(
+      `INSERT INTO payments (id, client_id, ganap_reference_number, external_reference, amount, currency, status, source, raw_payload, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'internal_upsell', ?, ?)`
+    )
+    .bind(paymentId, client.id, payload.referenceNumber, payload.externalReference, payload.amount, payload.currency, payload.status, rawBody, now)
+    .run();
+
+  // A new plan purchase supersedes any existing active plan — a client has
+  // one active plan at a time. Add-ons stack (never superseded).
+  if (catalogItem.itemType === "plan") {
+    await db
+      .prepare(`UPDATE subscriptions SET status = 'cancelled', ended_at = ? WHERE client_id = ? AND item_type = 'plan' AND status = 'active'`)
+      .bind(now, client.id)
+      .run();
+  }
+
+  const nextRenewalDate = catalogItem.renewalPhp ? addInterval(now, catalogItem.billing) : null;
+
+  await db
+    .prepare(
+      `INSERT INTO subscriptions (id, client_id, plan, status, started_at, item_type, item_id, item_name, billing_cycle, amount_php, renewal_amount_php, next_renewal_date, payment_id)
+       VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      crypto.randomUUID(),
+      client.id,
+      catalogItem.name,
+      now,
+      catalogItem.itemType,
+      catalogItem.id,
+      catalogItem.name,
+      catalogItem.billing,
+      payload.amount,
+      catalogItem.renewalPhp ?? null,
+      nextRenewalDate,
+      paymentId
+    )
+    .run();
+
+  await db
+    .prepare(`INSERT INTO client_activity (id, client_id, type, description, actor_id, created_at) VALUES (?, ?, 'purchase', ?, NULL, ?)`)
+    .bind(crypto.randomUUID(), client.id, `Purchased ${catalogItem.name} (₱${payload.amount})`, now)
+    .run();
+
+  if (env.RESEND_API_KEY && env.RESEND_FROM_EMAIL) {
+    try {
+      const { subject, html } = upsellPurchaseEmail({
+        clientName: client.full_name,
+        businessName: client.business_name,
+        itemName: catalogItem.name,
+        amount: payload.amount,
+        currency: payload.currency,
+        renewalAmount: catalogItem.renewalPhp ?? null,
+        nextRenewalDate,
+      });
+      await sendEmail({ RESEND_API_KEY: env.RESEND_API_KEY, RESEND_FROM_EMAIL: env.RESEND_FROM_EMAIL }, { to: client.email, subject, html });
+    } catch (err) {
+      console.error("ganap webhook (internal_upsell): failed to send purchase confirmation email", err);
+    }
+  } else {
+    console.error("ganap webhook (internal_upsell): RESEND_API_KEY/RESEND_FROM_EMAIL not configured; purchase confirmation email not sent");
+  }
+
+  return new Response("ok", { status: 200 });
+}
+
+async function handleForYourBusinessSignup(db: D1Database, payload: GanapWebhookPayload, rawBody: string, env: Env): Promise<Response> {
   const email = payload.customer?.email;
   if (!email) {
-    console.error("ganap webhook: payload has no customer email, cannot create a client", rawBody);
+    console.error("ganap webhook (foryourbusiness_299): payload has no customer email, cannot create a client", rawBody);
     return new Response("ok", { status: 200 });
   }
 
@@ -271,11 +399,61 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       // just retry delivery and hit the idempotency check above instead
       // of re-sending). Staff can nudge the client manually via
       // ClientKeeper's resend action if this happens.
-      console.error("ganap webhook: failed to send payment confirmation email", err);
+      console.error("ganap webhook (foryourbusiness_299): failed to send payment confirmation email", err);
     }
   } else {
-    console.error("ganap webhook: RESEND_API_KEY/RESEND_FROM_EMAIL not configured; payment confirmation email not sent");
+    console.error("ganap webhook (foryourbusiness_299): RESEND_API_KEY/RESEND_FROM_EMAIL not configured; payment confirmation email not sent");
   }
 
   return new Response("ok", { status: 200 });
+}
+
+export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
+  if (!env.GANAP_SECRET || !env.DB) {
+    console.error("ganap webhook: missing GANAP_SECRET or DB binding");
+    return new Response("Not configured", { status: 500 });
+  }
+
+  const rawBody = await request.text();
+  const signature = request.headers.get(SIGNATURE_HEADER) || "";
+
+  const expectedSignature = await hmacSha256Hex(env.GANAP_SECRET, rawBody);
+  if (!signature || !timingSafeEqual(signature, expectedSignature)) {
+    console.error("ganap webhook: signature mismatch, rejecting");
+    return new Response("Invalid signature", { status: 401 });
+  }
+
+  const payload = parsePayload(rawBody);
+  if (!payload) {
+    console.error("ganap webhook: body is not valid JSON or missing required fields", rawBody);
+    return new Response("Invalid body", { status: 400 });
+  }
+
+  if (payload.event !== "transaction.paid") {
+    console.log(`ganap webhook: ignoring event "${payload.event}"`);
+    return new Response("ok", { status: 200 });
+  }
+
+  const db = env.DB;
+
+  if (payload.externalReference) {
+    const existing = await db
+      .prepare(`SELECT id FROM payments WHERE external_reference = ?`)
+      .bind(payload.externalReference)
+      .first<{ id: string }>();
+    if (existing) {
+      console.log(`ganap webhook: externalReference ${payload.externalReference} already processed, skipping`);
+      return new Response("ok", { status: 200 });
+    }
+  }
+
+  if (metaString(payload.metadata, "kind") === "bill_of_service") {
+    return handleBillOfService(db, payload, rawBody);
+  }
+
+  if (metaString(payload.metadata, "clientId") && metaString(payload.metadata, "itemId")) {
+    return handleInternalUpsell(db, payload, rawBody, env);
+  }
+
+  return handleForYourBusinessSignup(db, payload, rawBody, env);
 };

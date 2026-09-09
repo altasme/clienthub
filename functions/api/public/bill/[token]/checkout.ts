@@ -1,12 +1,12 @@
 // Cloudflare Pages Function: POST /api/public/bill/:token/checkout
 //
-// Starts a ganap.net checkout for a Bill of Service's exact total —
-// reuses the SAME alta_internal_upsell ganap.net project/secret as
-// functions/api/client/checkout-upsell.ts (the Pricing page), rather than
-// standing up a third ganap.net project just for this. The webhook
-// (functions/api/webhooks/internal-upsell.ts) branches on
-// `metadata.kind === "bill_of_service"` to tell a bill payment apart from
-// a catalog-item purchase.
+// Starts a ganap.net checkout for a Bill of Service's exact total — shares
+// the single consolidated ganap.net project/secret [2026-09-09] with the
+// /foryourbusiness ₱299 checkout and the Pricing-page upsell checkout,
+// rather than standing up a separate project just for this. The webhook
+// (functions/api/webhooks/ganap.ts, merged from the old separate
+// internal-upsell.ts) branches on `metadata.kind === "bill_of_service"` to
+// tell a bill payment apart from the other two flows.
 //
 // No auth (see the sibling [token].ts for why) — the token itself, plus
 // the pending/not-expired checks below, are the only gate. Amount is
@@ -16,8 +16,8 @@
 import { startGanapCheckout } from "../../../../_lib/ganap";
 
 interface Env {
-  GANAP_INTERNAL_UPSELL_SECRET: string;
-  GANAP_INTERNAL_UPSELL_PROJECT_UUID: string;
+  GANAP_SECRET: string;
+  GANAP_PROJECT_UUID: string;
   DB?: D1Database;
 }
 
@@ -26,10 +26,10 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 export const onRequestPost: PagesFunction<Env, "token"> = async ({ env, params }) => {
-  if (!env.GANAP_INTERNAL_UPSELL_SECRET || !env.GANAP_INTERNAL_UPSELL_PROJECT_UUID || !env.DB) {
+  if (!env.GANAP_SECRET || !env.GANAP_PROJECT_UUID || !env.DB) {
     const missing = [
-      !env.GANAP_INTERNAL_UPSELL_SECRET && "GANAP_INTERNAL_UPSELL_SECRET",
-      !env.GANAP_INTERNAL_UPSELL_PROJECT_UUID && "GANAP_INTERNAL_UPSELL_PROJECT_UUID",
+      !env.GANAP_SECRET && "GANAP_SECRET",
+      !env.GANAP_PROJECT_UUID && "GANAP_PROJECT_UUID",
       !env.DB && "DB binding",
     ].filter(Boolean);
     console.error(`bill checkout: not configured, missing: ${missing.join(", ")}`);
@@ -85,7 +85,7 @@ export const onRequestPost: PagesFunction<Env, "token"> = async ({ env, params }
   const idempotencyKey = crypto.randomUUID();
   const publicBillUrl = `https://account.altasme.com/bill/${token}`;
 
-  const result = await startGanapCheckout(env.GANAP_INTERNAL_UPSELL_SECRET, env.GANAP_INTERNAL_UPSELL_PROJECT_UUID, {
+  const result = await startGanapCheckout(env.GANAP_SECRET, env.GANAP_PROJECT_UUID, {
     amount: bill.total_amount,
     customerName: bill.client_full_name || bill.recipient_name,
     customerEmail,
