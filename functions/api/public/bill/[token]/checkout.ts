@@ -73,12 +73,14 @@ export const onRequestPost: PagesFunction<Env, "token"> = async ({ env, params }
   // An explicit recipient_email (set at bill-creation time) wins over the
   // linked client's own email — staff may deliberately want a bill routed
   // to a different contact (e.g. a client's accounting inbox) than the
-  // client's main account email.
-  const customerEmail = bill.recipient_email || bill.client_email;
-  if (!customerEmail) {
-    console.error(`bill checkout: bill ${bill.id} has no client_email or recipient_email, cannot start ganap checkout`);
-    return jsonResponse(500, { error: "This bill is missing contact info needed to process payment. Please contact us directly." });
-  }
+  // client's main account email. Recipient email is optional on bill
+  // creation (ClientKeeper CLAUDE.md §12 — operator decision, 2026-09-09:
+  // staff share the link manually, an email isn't required to do that),
+  // so this falls back to a generic placeholder rather than blocking
+  // payment outright — ganap.net's checkout API requires *some*
+  // customerEmail string, but nothing in this app's own flow depends on
+  // it being a real, deliverable address.
+  const customerEmail = bill.recipient_email || bill.client_email || "billing@altasme.com";
 
   const idempotencyKey = crypto.randomUUID();
   const publicBillUrl = `https://account.altasme.com/bill/${token}`;
