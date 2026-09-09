@@ -256,9 +256,20 @@ CREATE INDEX IF NOT EXISTS idx_offer_events_offer_id ON offer_events(offer_id);
 -- and a CHECK constraint change needs the table recreated — see CLAUDE.md
 -- for the exact migration SQL, both for the original 2-value CHECK and
 -- this 3-value one).
+--
+-- client_id deliberately has NO `REFERENCES clients(id)` (unlike bills.
+-- client_id below) — an earlier version of this file declared one, but
+-- running the recreate-table migration against the real production
+-- database (2026-09-09) hit a real orphaned client_id from this table's
+-- long ALTER-TABLE history, which a declared-but-never-truly-enforced FK
+-- had been silently tolerating for who knows how long. Nothing in the app
+-- relies on FK enforcement here (every query already checks a client
+-- exists before touching it, per this file's own "No RLS" note up top),
+-- so the annotation was dropped rather than chasing down and fixing
+-- historical data for a constraint nothing needs.
 CREATE TABLE IF NOT EXISTS payments (
   id TEXT PRIMARY KEY,
-  client_id TEXT REFERENCES clients(id),
+  client_id TEXT,
   ganap_reference_number TEXT NOT NULL,
   external_reference TEXT UNIQUE,
   amount INTEGER NOT NULL,            -- whole pesos

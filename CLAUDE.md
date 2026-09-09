@@ -363,14 +363,17 @@ The operator's request: a payment-request generator, called "Bill of Service" �
 
 **How this was tested:** live, end to end, across *both* repos at once — a real first for this project's local-testing pattern. `clienthub` and `clientkeeper`'s gitignored `wrangler.toml`s were pointed at the same `database_id` with `wrangler pages dev --persist-to <shared dir>`, so a bill created via ClientKeeper's API was immediately readable via clienthub's public endpoint on a different port, exactly mirroring how they share one real D1 database in production (all scaffolding deleted after the session, never committed). Verified: a corporate bill created in ClientKeeper was correctly fetched by clienthub's public GET (contact person, TIN, scope, line items, total all present); a forged webhook signature got a `401`, a correctly-signed `transaction.paid` with `metadata.kind: "bill_of_service"` flipped the bill to `paid` and created the matching `payments` row, and replaying the identical payload was a no-op (payments count stayed at 1); a backdated `expires_at` correctly flipped a bill to `expired` on read, and checkout on it, on a paid bill, and on a cancelled bill all correctly 400'd with the right message; the recreate-table CHECK-constraint migration below was tested in full isolation (old data preserved, new value accepted) before being written up for the operator. Playwright screenshots confirmed all four public states (`pending` with a working "Make a Payment Now" button, `paid`, `expired`, `cancelled`) plus the not-found state, at both desktop and mobile (390×844) widths.
 
-**REQUIRED MIGRATION for the live database** (same "this file's `CREATE TABLE IF NOT EXISTS` is a no-op against an existing table" situation as every prior schema change in this project) — `payments.source`'s CHECK constraint needs a third value, which SQLite can't add via `ALTER TABLE`; the table has to be recreated. Run against the live D1 database before deploying this feature:
+**REQUIRED MIGRATION for the live database** (same "this file's `CREATE TABLE IF NOT EXISTS` is a no-op against an existing table" situation as every prior schema change in this project) — `payments.source`'s CHECK constraint needs a third value, which SQLite can't add via `ALTER TABLE`; the table has to be recreated. Running this for real against production (2026-09-09) surfaced two things the isolated test in this section's original write-up didn't catch, both fixed in the version below:
+
+1. **Column order.** `SELECT *` matches columns by position, not name — and this table's real column order (built up over time via `ALTER TABLE ADD COLUMN`) doesn't match the order in this file's `CREATE TABLE`. The first attempt used a bare `INSERT ... SELECT *` and got a CHECK-constraint failure on `source` even though every actual `source` value in the table was valid — a value from some *other* column was landing in `source`'s position. Fixed by naming every column explicitly on both sides of the copy.
+2. **No real foreign key.** `client_id` was declared `REFERENCES clients(id)` here and in `d1/schema.sql`, but that was never actually enforced on the live table (again, an old table evolved via `ALTER TABLE`, which doesn't retroactively add real FK enforcement) — production has at least one `payments` row whose `client_id` doesn't match any current `clients.id` (most likely a client record deleted at some point). The fresh `CREATE TABLE` tried to enforce the FK for real and rejected that row. Since nothing in the app relies on FK enforcement on this column (every query already checks a client exists before touching it), the `REFERENCES` annotation was dropped from both this migration and `d1/schema.sql`'s `payments` table rather than chasing down and "fixing" historical data for a constraint nothing needs.
 
 ```sql
 ALTER TABLE payments RENAME TO payments_old;
 
 CREATE TABLE payments (
   id TEXT PRIMARY KEY,
-  client_id TEXT REFERENCES clients(id),
+  client_id TEXT,
   ganap_reference_number TEXT NOT NULL,
   external_reference TEXT UNIQUE,
   amount INTEGER NOT NULL,
@@ -381,11 +384,16 @@ CREATE TABLE payments (
   created_at TEXT NOT NULL
 );
 
-INSERT INTO payments SELECT * FROM payments_old;
+INSERT INTO payments (id, client_id, ganap_reference_number, external_reference, amount, currency, status, source, raw_payload, created_at)
+SELECT id, client_id, ganap_reference_number, external_reference, amount, currency, status, source, raw_payload, created_at
+FROM payments_old;
+
 DROP TABLE payments_old;
 
 CREATE INDEX IF NOT EXISTS idx_payments_client_id ON payments(client_id);
 ```
+
+The D1 Console runs a pasted multi-statement block as one implicit transaction — confirmed live: when the `INSERT` failed partway through, the `RENAME`/`CREATE` from earlier in the same paste rolled back too, leaving the original `payments` table completely untouched rather than half-migrated. That's the safe failure mode; if a future run of this fails partway, check `SELECT name FROM sqlite_master WHERE type='table'` for a stray `payments_old` before assuming data was lost.
 
 Also apply the new `bills`/`bill_line_items` tables from `d1/schema.sql` (a plain `CREATE TABLE IF NOT EXISTS`, safe to run as-is — these are brand new tables, nothing to migrate).
 
