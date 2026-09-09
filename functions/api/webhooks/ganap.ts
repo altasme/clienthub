@@ -84,14 +84,14 @@ import { hmacSha256Hex, timingSafeEqual } from "../../_lib/crypto";
 import { sendEmail, paymentConfirmationEmail, upsellPurchaseEmail } from "../../_lib/email";
 import { findCatalogItem } from "../../_lib/pricing";
 
-interface Env {
+export interface Env {
   GANAP_SECRET: string;
   RESEND_API_KEY?: string;
   RESEND_FROM_EMAIL?: string;
   DB?: D1Database;
 }
 
-interface GanapWebhookPayload {
+export interface GanapWebhookPayload {
   event: string;
   referenceNumber: string;
   externalReference: string | null;
@@ -408,6 +408,40 @@ async function handleForYourBusinessSignup(db: D1Database, payload: GanapWebhook
   return new Response("ok", { status: 200 });
 }
 
+/**
+ * The shared dispatch core, used by both the real webhook below AND the
+ * manual reconciliation endpoint (functions/api/public/bill/[token]/
+ * reconcile.ts) for a payment whose webhook delivery never arrived —
+ * ganap's own Status & Retry API confirms `paid: true` server-to-server,
+ * and this applies the exact same DB mutations a real delivery would have,
+ * idempotency check included. Callers are responsible for having already
+ * confirmed the transaction is actually paid (this does not re-verify a
+ * signature — the reconciliation caller authenticates the status-check
+ * call itself, not this function).
+ */
+export async function applyPaidGanapTransaction(db: D1Database, env: Env, payload: GanapWebhookPayload, rawBody: string): Promise<Response> {
+  if (payload.externalReference) {
+    const existing = await db
+      .prepare(`SELECT id FROM payments WHERE external_reference = ?`)
+      .bind(payload.externalReference)
+      .first<{ id: string }>();
+    if (existing) {
+      console.log(`ganap webhook: externalReference ${payload.externalReference} already processed, skipping`);
+      return new Response("ok", { status: 200 });
+    }
+  }
+
+  if (metaString(payload.metadata, "kind") === "bill_of_service") {
+    return handleBillOfService(db, payload, rawBody);
+  }
+
+  if (metaString(payload.metadata, "clientId") && metaString(payload.metadata, "itemId")) {
+    return handleInternalUpsell(db, payload, rawBody, env);
+  }
+
+  return handleForYourBusinessSignup(db, payload, rawBody, env);
+}
+
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   if (!env.GANAP_SECRET || !env.DB) {
     console.error("ganap webhook: missing GANAP_SECRET or DB binding");
@@ -434,26 +468,5 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     return new Response("ok", { status: 200 });
   }
 
-  const db = env.DB;
-
-  if (payload.externalReference) {
-    const existing = await db
-      .prepare(`SELECT id FROM payments WHERE external_reference = ?`)
-      .bind(payload.externalReference)
-      .first<{ id: string }>();
-    if (existing) {
-      console.log(`ganap webhook: externalReference ${payload.externalReference} already processed, skipping`);
-      return new Response("ok", { status: 200 });
-    }
-  }
-
-  if (metaString(payload.metadata, "kind") === "bill_of_service") {
-    return handleBillOfService(db, payload, rawBody);
-  }
-
-  if (metaString(payload.metadata, "clientId") && metaString(payload.metadata, "itemId")) {
-    return handleInternalUpsell(db, payload, rawBody, env);
-  }
-
-  return handleForYourBusinessSignup(db, payload, rawBody, env);
+  return applyPaidGanapTransaction(env.DB, env, payload, rawBody);
 };

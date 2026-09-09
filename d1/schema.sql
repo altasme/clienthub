@@ -321,7 +321,18 @@ CREATE TABLE IF NOT EXISTS bills (
   payment_id TEXT REFERENCES payments(id),
   created_by TEXT NOT NULL REFERENCES users(id),
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  -- The referenceNumber ganap.net returned from the MOST RECENT checkout
+  -- attempt for this bill (functions/api/public/bill/[token]/checkout.ts).
+  -- Not the payment's own record — a bill can be checked out more than
+  -- once (retries) and only the latest attempt is worth reconciling.
+  -- Nullable: a bill that's never had anyone click "pay" has none yet.
+  -- Added 2026-09-09 for the manual "Check Payment Status" reconciliation
+  -- action (functions/api/public/bill/[token]/reconcile.ts) — a plain
+  -- ALTER TABLE ADD COLUMN is safe here (nullable, no CHECK/FK/DEFAULT
+  -- complications), unlike the payments.source CHECK-constraint migration
+  -- earlier in this file's history, which needed a full table rebuild.
+  last_checkout_reference TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_bills_token ON bills(token);

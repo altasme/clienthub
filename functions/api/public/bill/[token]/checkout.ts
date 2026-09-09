@@ -101,5 +101,16 @@ export const onRequestPost: PagesFunction<Env, "token"> = async ({ env, params }
 
   if (!result.ok) return jsonResponse(result.status, { error: result.error });
 
+  // Persisted so a later "Check Payment Status" reconciliation (functions/
+  // api/public/bill/[token]/reconcile.ts) has a referenceNumber to ask
+  // ganap.net about if the webhook never arrives — ganap's Status API
+  // requires it, and it's otherwise never stored server-side (the browser
+  // is what completes the flow). Only the LATEST attempt matters; a retry
+  // simply overwrites it.
+  await db
+    .prepare(`UPDATE bills SET last_checkout_reference = ?, updated_at = ? WHERE id = ?`)
+    .bind(result.referenceNumber, new Date().toISOString(), bill.id)
+    .run();
+
   return jsonResponse(200, { redirectUrl: result.redirectUrl, referenceNumber: result.referenceNumber, kind: result.kind });
 };
