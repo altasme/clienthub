@@ -36,9 +36,10 @@ export default function Layout() {
     <div className="min-h-screen bg-paper-alt">
       <header className="border-b border-ink/5 bg-white">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-brand-blue">Altaventures</p>
-            <p className="text-lg font-bold text-brand-navy">Client Hub</p>
+          <div className="flex items-center gap-3">
+            <img src="/images/brand/altaventures-logo.png" alt="Altaventures" width={838} height={105} className="h-6 w-auto" />
+            <span className="h-6 w-px bg-ink/10" aria-hidden="true" />
+            <p className="text-sm font-bold text-brand-navy">Client Hub</p>
           </div>
           <nav className="flex items-center gap-6">
             <NavLink to="/" end className={navLinkClass}>

@@ -70,6 +70,17 @@ export const onRequestPost: PagesFunction<Env, "token"> = async ({ env, params }
     return jsonResponse(400, { error: "This bill has expired. Please ask us for a new one." });
   }
 
+  // ganap.net enforces a real minimum transaction amount (₱200, discovered
+  // 2026-09-10). ClientKeeper's own bill-creation endpoint now blocks a
+  // bill under that amount, but this check stays here too as a safety net
+  // for anything created before that validation existed, so the client
+  // sees a clear message instead of a generic checkout failure.
+  const GANAP_MINIMUM_AMOUNT_PHP = 200;
+  if (bill.total_amount < GANAP_MINIMUM_AMOUNT_PHP) {
+    console.error(`bill checkout: bill ${bill.id} total ${bill.total_amount} is below ganap's ₱${GANAP_MINIMUM_AMOUNT_PHP} minimum`);
+    return jsonResponse(400, { error: "This bill's total is below our payment provider's minimum. Please contact us directly." });
+  }
+
   // An explicit recipient_email (set at bill-creation time) wins over the
   // linked client's own email — staff may deliberately want a bill routed
   // to a different contact (e.g. a client's accounting inbox) than the

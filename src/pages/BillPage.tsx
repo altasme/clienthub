@@ -150,8 +150,8 @@ export default function BillPage() {
   return (
     <div className="min-h-screen bg-paper-alt px-4 py-10 sm:py-16">
       <div className="mx-auto max-w-2xl">
-        <div className="mb-4 text-center">
-          <p className="text-xs font-semibold uppercase tracking-wide text-brand-blue">Altaventures</p>
+        <div className="mb-4 flex justify-center">
+          <img src="/images/brand/altaventures-logo.png" alt="Altaventures" width={838} height={105} className="h-7 w-auto" />
         </div>
 
         <div className="rounded-2xl border border-ink/10 bg-white p-6 shadow-sm sm:p-10">
