@@ -2,7 +2,7 @@
 //
 // Starts a ganap.net checkout for a Bill of Service's exact total — shares
 // the single consolidated ganap.net project/secret [2026-09-09] with the
-// /foryourbusiness ₱299 checkout and the Pricing-page upsell checkout,
+// /foryourbusiness ₱499 checkout and the Pricing-page upsell checkout,
 // rather than standing up a separate project just for this. The webhook
 // (functions/api/webhooks/ganap.ts, merged from the old separate
 // internal-upsell.ts) branches on `metadata.kind === "bill_of_service"` to

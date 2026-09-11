@@ -532,3 +532,23 @@ Audited the payment flow end to end (marketing site checkout through this app's 
 - That both Cloudflare Pages projects (`altaventureswebsite` and `clienthub`) currently hold the same live `GANAP_SECRET`/`GANAP_PROJECT_UUID` pair.
 
 **How this was tested:** `npm run build`, `npx tsc -p functions/tsconfig.json --noEmit`, and `npm run lint` all passed clean. The logo rendering was checked visually (a standalone screenshot at the exact heights used in each surface) rather than through a full authenticated flow, since most of this app's pages sit behind WorkOS login this sandbox cannot complete.
+
+---
+
+## 20. Starter Plan price raised from ₱299 to ₱499 [2026-09-11]
+
+Companion to the marketing site's CLAUDE.md §21: the operator raised the /foryourbusiness offer's price from ₱299 to ₱499. Since the auto-assigned Starter Plan subscription (created on signup by this app's own webhook) records that same real-world purchase, its recorded amount had to move with it, or a client's Account page would show ₱299 for a plan they actually paid ₱499 for.
+
+**Changed:**
+- `functions/_lib/pricing.ts`: the `starter` catalog entry's `chargeNowPhp` is now 499.
+- `src/content/pricing.ts`: the Pricing page's own Starter card, `priceLabel` and `chargeNowPhp` both updated to match.
+- `functions/api/webhooks/ganap.ts`: the comments describing current routing/behavior and the Starter Plan assignment were updated to ₱499. The illustrative example payload in the header comment (`"amount": 299`) was updated to 499 as well.
+- `functions/api/client/checkout-upsell.ts` and `functions/api/public/bill/[token]/checkout.ts`: header comments describing which checkout shares the consolidated ganap.net project were updated to ₱499.
+
+**Deliberately left unchanged, same reasoning as the marketing site's own note (CLAUDE.md §21 there):**
+- The historical narrative at the top of `functions/api/webhooks/ganap.ts` describing the pre-consolidation two-project split ("this file for the /foryourbusiness ₱299 project") is a real historical fact about what existed before September 9, and changing the number would misrepresent that history.
+- Every `console.error("ganap webhook (foryourbusiness_299): ...")` log tag, and the `payments.source` CHECK constraint's `'foryourbusiness_299'` enum value in `d1/schema.sql`. These are internal identifiers, not price statements, nothing displays them to anyone, and renaming the D1 enum value would require the same CHECK-constraint table rebuild documented in §16, for a change that carries no functional or customer-facing benefit.
+
+**Also updated in `clientkeeper`** (a separate repo, see its own CLAUDE.md): its own copy of the Starter Plan catalog entry and the staff-facing "Set Plan" override dropdown label.
+
+**How this was tested:** `npm run build`, `npx tsc -p functions/tsconfig.json --noEmit`, and `npm run lint` all passed clean. Grepped the whole repo for "299" before and after to confirm every remaining occurrence is one of the two deliberate exceptions above.

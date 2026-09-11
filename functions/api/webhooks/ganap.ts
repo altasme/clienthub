@@ -23,7 +23,7 @@
 //   - metadata.clientId && metadata.itemId present  -> internal-upsell/
 //                                                       catalog-item flow
 //   - neither of the above                          -> /foryourbusiness
-//                                                       ₱299 signup flow
+//                                                       ₱499 signup flow
 //                                                       (the original,
 //                                                       untagged shape —
 //                                                       kept untagged
@@ -44,7 +44,7 @@
 //     "event": "transaction.paid",       // the only event sent today
 //     "referenceNumber": "...",
 //     "externalReference": "..." | null, // the idempotencyKey from checkout
-//     "amount": 299,                     // gross, in whole pesos
+//     "amount": 499,                     // gross, in whole pesos
 //     "currency": "PHP",
 //     "status": "paid",
 //     "customer": { "name": "...", "email": "..." } | null,
@@ -78,7 +78,8 @@
 // Auto-assigns the Starter Plan on the signup flow only [2026-09-07,
 // unchanged]: a brand-new client (never seen this email before) gets an
 // active `subscriptions` row for "starter" (functions/_lib/pricing.ts,
-// ₱299). A returning client (matched by email) does NOT get this.
+// ₱499, raised from ₱299 on 2026-09-11). A returning client (matched by
+// email) does NOT get this.
 
 import { hmacSha256Hex, timingSafeEqual } from "../../_lib/crypto";
 import { sendEmail, paymentConfirmationEmail, upsellPurchaseEmail } from "../../_lib/email";
@@ -356,11 +357,11 @@ async function handleForYourBusinessSignup(db: D1Database, payload: GanapWebhook
     .bind(paymentId, clientId, payload.referenceNumber, payload.externalReference, payload.amount, payload.currency, payload.status, rawBody, now)
     .run();
 
-  // Every new client starts on the Starter Plan (₱299, the /foryourbusiness
+  // Every new client starts on the Starter Plan (₱499, the /foryourbusiness
   // offer they just paid for) — staff can override this later from
   // ClientKeeper (functions/api/app/clients/[id]/set-plan.ts there). Only
   // for a genuinely NEW client: a returning client paying for a second
-  // project already has their own plan history, which a second ₱299
+  // project already has their own plan history, which a second ₱499
   // payment shouldn't silently reset.
   if (!existingClient) {
     const starterPlan = findCatalogItem("starter");

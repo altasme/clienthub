@@ -9,7 +9,7 @@
 // checkout API takes amount/redirects/metadata per request rather than
 // tying them to a project, so there was no functional reason to keep two
 // projects around. Now shares GANAP_SECRET/GANAP_PROJECT_UUID with the
-// /foryourbusiness ₱299 checkout and the Bill of Service checkout, and its
+// /foryourbusiness ₱499 checkout and the Bill of Service checkout, and its
 // webhook is handled by the merged functions/api/webhooks/ganap.ts
 // (branches on metadata.clientId/itemId vs metadata.kind ===
 // "bill_of_service" vs neither). See that file's header comment for the

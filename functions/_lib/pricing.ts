@@ -45,7 +45,7 @@ export interface CatalogItem {
 }
 
 export const PRICING_CATALOG: CatalogItem[] = [
-  { id: "starter", name: "Starter Plan", itemType: "plan", billing: "one_time", chargeNowPhp: 299 },
+  { id: "starter", name: "Starter Plan", itemType: "plan", billing: "one_time", chargeNowPhp: 499 },
   { id: "basic", name: "Basic Plan", itemType: "plan", billing: "annual", chargeNowPhp: 1500, renewalPhp: 1500 },
   { id: "essential", name: "Essential Plan", itemType: "plan", billing: "annual", chargeNowPhp: 5700, renewalPhp: 4200 },
   { id: "business", name: "Business Plan", itemType: "plan", billing: "annual", chargeNowPhp: 11500, renewalPhp: 10000 },
