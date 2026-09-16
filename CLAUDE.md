@@ -594,11 +594,23 @@ No column here is read or written by this app (`clienthub`) — `GET /api/client
 
 ## 23. Correction: `domain_expires_at` renamed to `domain_registered_at` [2026-09-16]
 
-§22 above was written with the wrong field: the operator clarified immediately afterward that staff input the domain's **registration** date, and expiration is always registration + 1 year, computed on demand rather than stored as its own column (so it can never drift from the registration date if that's later corrected). Caught before this was ever deployed — no live database ever had the `domain_expires_at` column, so this is a clean rename, not a data migration.
+§22 above was written with the wrong field: the operator clarified immediately afterward that staff input the domain's **registration** date, and expiration is always registration + 1 year, computed on demand rather than stored as its own column (so it can never drift from the registration date if that's later corrected).
+
+**Correction to this section's own earlier claim: the §22 migration WAS already run against the live database** before the code-level rename happened — the operator applied `ALTER TABLE clients ADD COLUMN domain_expires_at TEXT; ALTER TABLE clients ADD COLUMN plan_renewal_date TEXT;` successfully, then hit `duplicate column name: plan_renewal_date` when attempting the corrected pair below as a second statement, confirming `plan_renewal_date` (and, if the two ALTER TABLE statements were applied as one transaction, likely `domain_registered_at` too) were rolled back or already present. Live state as of 2026-09-16: `domain_expires_at` and `plan_renewal_date` exist; `domain_registered_at` may or may not, depending on whether the corrected pair partially applied before failing.
+
+**To finish the migration**, run only the one column this correction actually needs, checking first if unsure:
 
 ```sql
+-- If domain_registered_at doesn't exist yet, this adds it:
 ALTER TABLE clients ADD COLUMN domain_registered_at TEXT;
-ALTER TABLE clients ADD COLUMN plan_renewal_date TEXT;
 ```
 
-Run the pair above (not the `domain_expires_at` version from §22) against the live database — `plan_renewal_date` is unaffected by this correction, it was already right. See clientkeeper's CLAUDE.md §20 for the full feature (the reminder email that computes expiration at send time).
+If that also errors as a duplicate column, `domain_registered_at` already exists and no further action is needed. `plan_renewal_date` needs no action either way, it was already correct in §22.
+
+**`domain_expires_at` is now a harmless, permanently unused orphan column** — no code anywhere reads or writes it (ClientKeeper's rename removed every reference). It can be dropped for cleanliness whenever convenient:
+
+```sql
+ALTER TABLE clients DROP COLUMN domain_expires_at;
+```
+
+...but there's no urgency; it holds no data of consequence (nothing ever wrote to it before the rename) and its presence breaks nothing. See clientkeeper's CLAUDE.md §20 for the full feature (the reminder email that computes expiration at send time).
