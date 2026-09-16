@@ -79,6 +79,17 @@ CREATE TABLE IF NOT EXISTS clients (
   -- column for the exact ALTER TABLE statement, since this file's
   -- CREATE TABLE IF NOT EXISTS is a no-op against an existing table.
   welcome_dismissed_at TEXT,
+  -- Staff-set record-keeping fields (ClientKeeper's Client Detail page,
+  -- "YYYY-MM-DD"), not derived from any billing/renewal logic: an admin
+  -- types these in directly so domain/plan renewal dates can be tracked
+  -- even for clients with no subscriptions row (a comp, a legacy client,
+  -- the new no-op "free"/"299" catalog entries) or whose real domain
+  -- registrar/renewal date doesn't match subscriptions.next_renewal_date's
+  -- auto-computed billing-cycle math. NULL means not tracked yet. Same
+  -- live-database migration caveat as welcome_dismissed_at above — see
+  -- clientkeeper's CLAUDE.md for the exact ALTER TABLE statements.
+  domain_expires_at TEXT,
+  plan_renewal_date TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

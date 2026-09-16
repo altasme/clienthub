@@ -570,3 +570,22 @@ Companion to the marketing site's CLAUDE.md §23: the operator reverted the /for
 **Also reverted in `clientkeeper`** (a separate repo, see its own CLAUDE.md): its own copy of the Starter Plan catalog entry and the "Set Plan" override dropdown label.
 
 **How this was tested:** `npm run build`, `npx tsc -p functions/tsconfig.json --noEmit`, and `npm run lint` all passed clean. Grepped the whole repo for "499" afterward: the only remaining hit is the deliberate historical narrative in `functions/api/webhooks/ganap.ts` describing both the raise and the revert.
+
+---
+
+## 22. Shared schema: `clients.domain_expires_at` / `clients.plan_renewal_date` [2026-09-16]
+
+Two new nullable columns added to `d1/schema.sql`'s `clients` table, driven entirely by a ClientKeeper feature (that repo's CLAUDE.md §19 documents the endpoints/UI) — landing here because this is the canonical copy of the shared schema (§0's "clienthub owns the account-creation bridge, the first writer of this data" convention).
+
+**What they're for:** staff-typed record-keeping, not derived from any billing logic. `subscriptions.next_renewal_date` already exists and is auto-computed by `set-plan.ts`'s `addInterval()` math whenever a plan subscription row exists — but that only covers plans with a real `renewalPhp`, and doesn't track a domain's actual registrar expiration at all. These two columns let staff record both dates directly for any client, independent of subscription state, and correct them to match reality (a domain renewed early, a plan comped at a different cadence than the catalog assumes) without resetting the client's whole plan history through "Set Plan".
+
+**This is a genuine schema migration, not just an edit to `d1/schema.sql`**, same caveat as `clients.welcome_dismissed_at` (§9) and the `payments.source` CHECK constraint (§16): that file's `CREATE TABLE IF NOT EXISTS` is a no-op against the already-created live `clients` table. Run against the real database before deploying ClientKeeper's change:
+
+```sql
+ALTER TABLE clients ADD COLUMN domain_expires_at TEXT;
+ALTER TABLE clients ADD COLUMN plan_renewal_date TEXT;
+```
+
+Confirmed via a local `wrangler d1 execute ... --local` that a fresh `CREATE TABLE IF NOT EXISTS` picks up both columns correctly for a brand-new database; only an *existing* database needs the manual `ALTER TABLE` pair above.
+
+No column here is read or written by this app (`clienthub`) — `GET /api/client/me` and `AccountPage.tsx` don't expose either field to the client. They exist purely for ClientKeeper's staff-facing Client Detail page.
