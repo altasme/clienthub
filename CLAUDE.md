@@ -552,3 +552,21 @@ Companion to the marketing site's CLAUDE.md §21: the operator raised the /foryo
 **Also updated in `clientkeeper`** (a separate repo, see its own CLAUDE.md): its own copy of the Starter Plan catalog entry and the staff-facing "Set Plan" override dropdown label.
 
 **How this was tested:** `npm run build`, `npx tsc -p functions/tsconfig.json --noEmit`, and `npm run lint` all passed clean. Grepped the whole repo for "299" before and after to confirm every remaining occurrence is one of the two deliberate exceptions above.
+
+---
+
+## 21. Starter Plan price reverted from ₱499 back to ₱299 [2026-09-16]
+
+Companion to the marketing site's CLAUDE.md §23: the operator reverted the /foryourbusiness offer's price back to ₱299, five days after the §20 raise. Same reasoning as §20 in reverse — the auto-assigned Starter Plan subscription records the same real-world purchase, so its recorded amount had to move back with it.
+
+**Changed:**
+- `functions/_lib/pricing.ts`: the `starter` catalog entry's `chargeNowPhp` is 299 again.
+- `src/content/pricing.ts`: the Pricing page's Starter card `priceLabel`/`chargeNowPhp` reverted to match.
+- `functions/api/webhooks/ganap.ts`: the routing/behavior and Starter Plan assignment comments reverted to ₱299; the illustrative example payload's `"amount"` is 299 again; the §20 history note ("₱499, raised from ₱299 on 2026-09-11") now reads "₱299, raised to ₱499 on 2026-09-11, reverted back to ₱299 on 2026-09-16" so the full history stays visible in the code.
+- `functions/api/client/checkout-upsell.ts` and `functions/api/public/bill/[token]/checkout.ts`: header comments reverted to ₱299.
+
+**Deliberately left unchanged, same as §20:** the pre-consolidation historical narrative in `functions/api/webhooks/ganap.ts`, the `console.error("ganap webhook (foryourbusiness_299): ...")` log tags, and the `payments.source` CHECK constraint's `'foryourbusiness_299'` enum value. None of these were ever renamed during the §20 raise, so none needed to change back.
+
+**Also reverted in `clientkeeper`** (a separate repo, see its own CLAUDE.md): its own copy of the Starter Plan catalog entry and the "Set Plan" override dropdown label.
+
+**How this was tested:** `npm run build`, `npx tsc -p functions/tsconfig.json --noEmit`, and `npm run lint` all passed clean. Grepped the whole repo for "499" afterward: the only remaining hit is the deliberate historical narrative in `functions/api/webhooks/ganap.ts` describing both the raise and the revert.
