@@ -589,3 +589,16 @@ ALTER TABLE clients ADD COLUMN plan_renewal_date TEXT;
 Confirmed via a local `wrangler d1 execute ... --local` that a fresh `CREATE TABLE IF NOT EXISTS` picks up both columns correctly for a brand-new database; only an *existing* database needs the manual `ALTER TABLE` pair above.
 
 No column here is read or written by this app (`clienthub`) — `GET /api/client/me` and `AccountPage.tsx` don't expose either field to the client. They exist purely for ClientKeeper's staff-facing Client Detail page.
+
+---
+
+## 23. Correction: `domain_expires_at` renamed to `domain_registered_at` [2026-09-16]
+
+§22 above was written with the wrong field: the operator clarified immediately afterward that staff input the domain's **registration** date, and expiration is always registration + 1 year, computed on demand rather than stored as its own column (so it can never drift from the registration date if that's later corrected). Caught before this was ever deployed — no live database ever had the `domain_expires_at` column, so this is a clean rename, not a data migration.
+
+```sql
+ALTER TABLE clients ADD COLUMN domain_registered_at TEXT;
+ALTER TABLE clients ADD COLUMN plan_renewal_date TEXT;
+```
+
+Run the pair above (not the `domain_expires_at` version from §22) against the live database — `plan_renewal_date` is unaffected by this correction, it was already right. See clientkeeper's CLAUDE.md §20 for the full feature (the reminder email that computes expiration at send time).

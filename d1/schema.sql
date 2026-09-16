@@ -85,10 +85,19 @@ CREATE TABLE IF NOT EXISTS clients (
   -- even for clients with no subscriptions row (a comp, a legacy client,
   -- the new no-op "free"/"299" catalog entries) or whose real domain
   -- registrar/renewal date doesn't match subscriptions.next_renewal_date's
-  -- auto-computed billing-cycle math. NULL means not tracked yet. Same
-  -- live-database migration caveat as welcome_dismissed_at above — see
-  -- clientkeeper's CLAUDE.md for the exact ALTER TABLE statements.
-  domain_expires_at TEXT,
+  -- auto-computed billing-cycle math. NULL means not tracked yet.
+  --
+  -- domain_registered_at is the date the domain was actually registered
+  -- (renamed from an earlier, briefly-drafted domain_expires_at that was
+  -- never deployed — see clientkeeper's CLAUDE.md §19/§20). Expiration is
+  -- NOT a stored column: it's always computed as registration + 1 year,
+  -- everywhere it's shown (ClientKeeper's UI, the renewal reminder email),
+  -- so there is exactly one source of truth for that date and no risk of
+  -- the two drifting apart if a registration date is corrected later.
+  --
+  -- Same live-database migration caveat as welcome_dismissed_at above —
+  -- see clientkeeper's CLAUDE.md for the exact ALTER TABLE statements.
+  domain_registered_at TEXT,
   plan_renewal_date TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
