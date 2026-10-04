@@ -44,8 +44,15 @@ export interface CatalogItem {
   renewalPhp?: number;
 }
 
+// Starter's chargeNowPhp raised 299 -> 599 [2026-10-02], matching the
+// marketing site's real /foryourbusiness price (altaventureswebsite's
+// functions/api/checkout.ts, raised the same day). This catalog entry
+// drives what the webhook below records as a brand-new client's starting
+// plan amount_php -- it had drifted out of sync with the real charge since
+// that price change, so every new Starter signup since 2026-10-02 was
+// logged at the stale 299 figure until this fix.
 export const PRICING_CATALOG: CatalogItem[] = [
-  { id: "starter", name: "Starter Plan", itemType: "plan", billing: "one_time", chargeNowPhp: 299 },
+  { id: "starter", name: "Starter Plan", itemType: "plan", billing: "one_time", chargeNowPhp: 599 },
   { id: "basic", name: "Basic Plan", itemType: "plan", billing: "annual", chargeNowPhp: 1500, renewalPhp: 1500 },
   { id: "essential", name: "Essential Plan", itemType: "plan", billing: "annual", chargeNowPhp: 5700, renewalPhp: 4200 },
   { id: "business", name: "Business Plan", itemType: "plan", billing: "annual", chargeNowPhp: 11500, renewalPhp: 10000 },

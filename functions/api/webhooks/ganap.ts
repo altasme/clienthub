@@ -357,23 +357,62 @@ async function handleForYourBusinessSignup(db: D1Database, payload: GanapWebhook
     .bind(paymentId, clientId, payload.referenceNumber, payload.externalReference, payload.amount, payload.currency, payload.status, rawBody, now)
     .run();
 
-  // Every new client starts on the Starter Plan (₱299, the /foryourbusiness
-  // offer they just paid for) — staff can override this later from
-  // ClientKeeper (functions/api/app/clients/[id]/set-plan.ts there). Only
-  // for a genuinely NEW client: a returning client paying for a second
-  // project already has their own plan history, which a second ₱299
-  // payment shouldn't silently reset.
-  if (!existingClient) {
-    const starterPlan = findCatalogItem("starter");
-    if (starterPlan) {
+  // Which plan this payment is actually for [2026-10-02, added for the
+  // /foryourbusiness checkout's optional-upgrade redesign]: the checkout
+  // now tags `metadata.upgrade` with "domain_hosting"/"business_tools"
+  // when the customer added one of those annual upgrades on top of the
+  // Starter Website, or "none"/omitted for Starter alone. Maps 1:1 onto
+  // this catalog's own "basic"/"essential" plan ids — the same two plans
+  // already sold as a later internal upsell, see functions/_lib/pricing.ts.
+  // An unrecognized value falls back to "starter" rather than failing the
+  // webhook, since the payment itself (the `payments` row above) is
+  // already committed regardless of what plan gets assigned.
+  const upgradeMeta = metaString(payload.metadata, "upgrade");
+  const planId = upgradeMeta === "domain_hosting" ? "basic" : upgradeMeta === "business_tools" ? "essential" : "starter";
+  const plan = findCatalogItem(planId) ?? findCatalogItem("starter");
+
+  // A genuinely NEW client starts on whichever plan they just paid for.
+  // A RETURNING client only gets their subscription touched when they paid
+  // for a real upgrade (planId !== "starter") — superseding their current
+  // active plan the same way handleInternalUpsell above does for a later
+  // purchase. A returning client paying the plain Starter amount again
+  // (e.g. a second project) keeps their existing plan untouched, same as
+  // before this change: a second base-tier payment shouldn't silently
+  // reset someone who already upgraded.
+  if (plan && (!existingClient || planId !== "starter")) {
+    if (existingClient) {
       await db
-        .prepare(
-          `INSERT INTO subscriptions (id, client_id, plan, status, started_at, item_type, item_id, item_name, billing_cycle, amount_php, payment_id)
-           VALUES (?, ?, ?, 'active', ?, 'plan', ?, ?, ?, ?, ?)`
-        )
-        .bind(crypto.randomUUID(), clientId, starterPlan.name, now, starterPlan.id, starterPlan.name, starterPlan.billing, starterPlan.chargeNowPhp, paymentId)
+        .prepare(`UPDATE subscriptions SET status = 'cancelled', ended_at = ? WHERE client_id = ? AND item_type = 'plan' AND status = 'active'`)
+        .bind(now, clientId)
         .run();
     }
+    // amount_php is payload.amount (what this transaction actually
+    // charged — e.g. 6299 for Starter+Essential), not plan.chargeNowPhp
+    // (essential's own standalone catalog price, 5700): this checkout
+    // always bills the Starter base plus the upgrade in one combined
+    // ganap charge, so the catalog constant alone would understate it.
+    // renewal_amount_php/next_renewal_date still come from the catalog
+    // (plan.renewalPhp), since that's the real number a future "Renew Now"
+    // charges regardless of what this specific first payment totaled.
+    await db
+      .prepare(
+        `INSERT INTO subscriptions (id, client_id, plan, status, started_at, item_type, item_id, item_name, billing_cycle, amount_php, renewal_amount_php, next_renewal_date, payment_id)
+         VALUES (?, ?, ?, 'active', ?, 'plan', ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        crypto.randomUUID(),
+        clientId,
+        plan.name,
+        now,
+        plan.id,
+        plan.name,
+        plan.billing,
+        payload.amount,
+        plan.renewalPhp ?? null,
+        plan.renewalPhp ? addInterval(now, plan.billing) : null,
+        paymentId
+      )
+      .run();
   }
 
   // Payment confirmation email — the only client-facing touch this

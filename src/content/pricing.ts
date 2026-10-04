@@ -55,9 +55,11 @@ export const PLANS: Plan[] = [
     id: "starter",
     name: "Starter",
     tagline: "Get your business online. Fast.",
-    priceLabel: "₱299 one-time",
+    // Raised 299 -> 599 [2026-10-02], matching functions/_lib/pricing.ts's
+    // own Starter entry and the marketing site's real current price.
+    priceLabel: "₱599 one-time",
     billing: "one_time",
-    chargeNowPhp: 299,
+    chargeNowPhp: 599,
     support: "Basic",
     included: ["Professional website (1 build)", "Altaventures subdomain", "Hosting & SSL"],
     notIncluded: [
