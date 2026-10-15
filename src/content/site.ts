@@ -20,6 +20,17 @@ export const CONTACT = {
   },
 } as const;
 
+// Shown on a Bill of Service's public page in place of the old automated
+// ganap.net "Make a Payment Now" checkout -- the operator's direct
+// instruction (2026-10-15) was to replace that button with manual GCash
+// payment details instead. Same real number already used for WhatsApp/
+// Viber above (0921 283 6683 in local format), the operator's own GCash
+// account.
+export const BILL_PAYMENT_METHOD = {
+  gcashNumber: "0921 283 6683",
+  gcashAccountName: "Van Da Vinci Amaranto",
+} as const;
+
 // Shown once, on first login, by <WelcomeModal /> — see functions/api/client/
 // welcome-dismiss.ts for how "once" is enforced server-side.
 export const WELCOME_MODAL = {

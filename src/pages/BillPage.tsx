@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { fetchPublicBill, startBillCheckout, PublicBillApiError, type PublicBill } from "../lib/publicBillApi";
+import { fetchPublicBill, type PublicBill } from "../lib/publicBillApi";
 import ChatModal from "../components/ChatModal";
+import { BILL_PAYMENT_METHOD } from "../content/site";
 
 // Altaventures' own TIN, printed on every Bill of Service's "From:" line —
 // given to us as "717-659--00000" (note the double dash); reproduced
@@ -37,17 +38,29 @@ function StatusBadge({ status }: { status: PublicBill["status"] }) {
   return <span className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide ${styles[status]}`}>{labels[status]}</span>;
 }
 
+function CopyChip({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        navigator.clipboard.writeText(value).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        })
+      }
+      className="rounded-full border border-ink/15 px-3 py-1 text-xs font-semibold text-brand-navy transition hover:border-brand-blue hover:text-brand-blue"
+    >
+      {copied ? "Copied!" : "Copy"}
+    </button>
+  );
+}
+
 export default function BillPage() {
   const { token } = useParams<{ token: string }>();
   const [bill, setBill] = useState<PublicBill | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [paying, setPaying] = useState(false);
-  const [payError, setPayError] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-
-  const retry = new URLSearchParams(window.location.search).get("retry") === "1";
-  const justPaid = new URLSearchParams(window.location.search).get("paid") === "1";
 
   useEffect(() => {
     if (!token) return;
@@ -65,57 +78,6 @@ export default function BillPage() {
       cancelled = true;
     };
   }, [token]);
-
-  // If we've just been redirected back from ganap.net but the bill is
-  // still "pending" here, the webhook likely just hasn't landed yet
-  // (async, at-least-once delivery — same gap this project always hedges
-  // for on a payment-return page). Poll a few times rather than making
-  // the client refresh manually.
-  useEffect(() => {
-    if (!justPaid || !token || !bill || bill.status !== "pending") return;
-    setConfirming(true);
-    let attempts = 0;
-    const interval = setInterval(async () => {
-      attempts += 1;
-      try {
-        const fresh = await fetchPublicBill(token);
-        if (fresh.status !== "pending") {
-          setBill(fresh);
-          setConfirming(false);
-          clearInterval(interval);
-        } else if (attempts >= 10) {
-          setConfirming(false);
-          clearInterval(interval);
-        }
-      } catch {
-        // transient fetch failure during polling — just try again next tick
-      }
-    }, 3000);
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [justPaid, token, bill?.status]);
-
-  const handlePay = async () => {
-    if (!token) return;
-    setPayError(null);
-    setPaying(true);
-    try {
-      const { redirectUrl, kind } = await startBillCheckout(token);
-      if (kind === "url") {
-        window.location.href = redirectUrl;
-      } else {
-        setPayError(
-          kind === "test-placeholder"
-            ? "This project is in ganap test mode. Complete the payment from the ganap.net dashboard (Test Mode → Simulate successful payment)."
-            : "This payment needs a QR scan that isn't supported here yet. Please message us instead."
-        );
-      }
-    } catch (err) {
-      setPayError(err instanceof PublicBillApiError ? err.message : "Something went wrong. Please try again.");
-    } finally {
-      setPaying(false);
-    }
-  };
 
   if (loadError) {
     return (
@@ -144,8 +106,6 @@ export default function BillPage() {
       </div>
     );
   }
-
-  const canPay = bill.status === "pending" && !confirming;
 
   return (
     <div className="min-h-screen bg-paper-alt px-4 py-10 sm:py-16">
@@ -206,11 +166,6 @@ export default function BillPage() {
           )}
 
           <div className="mt-8">
-            {retry && <p className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">Your payment didn't go through. Please try again.</p>}
-            {payError && <p className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{payError}</p>}
-
-            {confirming && <p className="text-sm text-ink/60">Thanks! We're confirming your payment now. This will update automatically&hellip;</p>}
-
             {bill.status === "paid" && (
               <p className="flex items-center gap-2 text-sm font-semibold text-green-700">
                 &#10003; This bill has been paid{bill.paidAt ? ` on ${formatDate(bill.paidAt)}` : ""}. Thank you!
@@ -243,15 +198,31 @@ export default function BillPage() {
               </div>
             )}
 
-            {canPay && (
-              <button
-                type="button"
-                disabled={paying}
-                onClick={handlePay}
-                className="inline-flex w-full items-center justify-center rounded-full bg-brand-blue px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-black/10 transition hover:-translate-y-0.5 hover:bg-[#0b57cc] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-              >
-                {paying ? "Starting checkout..." : "Make a Payment Now →"}
-              </button>
+            {bill.status === "pending" && (
+              <div className="rounded-2xl border border-ink/10 bg-paper-alt p-5">
+                <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">Payment Method</p>
+                <p className="mt-2 text-sm text-ink/70">Please settle this bill via GCash using the details below, then message us your payment confirmation.</p>
+                <div className="mt-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-ink/10 bg-white px-4 py-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">GCash Number</p>
+                      <p className="mt-0.5 text-base font-bold text-brand-navy">{BILL_PAYMENT_METHOD.gcashNumber}</p>
+                    </div>
+                    <CopyChip value={BILL_PAYMENT_METHOD.gcashNumber.replace(/\s+/g, "")} />
+                  </div>
+                  <div className="rounded-xl border border-ink/10 bg-white px-4 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">Account Name</p>
+                    <p className="mt-0.5 text-base font-bold text-brand-navy">{BILL_PAYMENT_METHOD.gcashAccountName}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setChatOpen(true)}
+                  className="mt-4 inline-flex w-full items-center justify-center rounded-full bg-brand-blue px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-black/10 transition hover:-translate-y-0.5 hover:bg-[#0b57cc] sm:w-auto"
+                >
+                  Message Us to Confirm Payment
+                </button>
+              </div>
             )}
           </div>
         </div>

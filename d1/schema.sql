@@ -472,20 +472,30 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity_type, entity
 -- =====================================================================
 
 -- Questionnaires first (proposals.questionnaire_id references this),
--- each with its own client-facing slug/token pair. title/description are
--- the live DRAFT buffer -- the thing the admin editor reads/writes while
--- composing, before and between publishes; questionnaire_versions holds
--- the frozen, published snapshots (see the questions table's comment
--- below for how the draft/published split works for the question list
--- itself, which is the part that actually matters for "don't disturb a
--- submitted response's original questions").
+-- each with its own client-facing slug/token pair.
+--
+-- [Redesigned 2026-10-15, pre-launch -- see git history for the original
+-- structured-question-builder version if ever needed for reference.] The
+-- original design (one row per question, 9 field types, per-question
+-- answers) was replaced with the exact same free-text shape as proposals
+-- at the operator's direct request ("can the questionnaire be the same
+-- as the proposal? Free text field for ease for us"): staff write
+-- anything in a rich-text editor (content_html, same draft/published
+-- split as proposals.content_html below) and the client replies in ONE
+-- open text box, no per-question setup at all. This was a clean,
+-- pre-launch replacement, not a migration -- this feature's D1 binding
+-- had not even been added to any Cloudflare Pages project yet (§59.5 of
+-- the marketing site's CLAUDE.md), so there was no live data of the old
+-- shape to carry forward. questionnaire_questions and
+-- questionnaire_answers are gone entirely; questionnaire_responses below
+-- now carries the one answer directly.
 CREATE TABLE IF NOT EXISTS questionnaires (
   id TEXT PRIMARY KEY,
   client_id TEXT NOT NULL REFERENCES clients(id),
   slug TEXT NOT NULL UNIQUE,
   access_token TEXT NOT NULL UNIQUE,
   title TEXT NOT NULL,
-  description TEXT,
+  content_html TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'submitted', 'closed')),
   current_version INTEGER NOT NULL DEFAULT 0,  -- 0 until first publish; matches the live questionnaire_versions.version_number
   created_by TEXT NOT NULL REFERENCES users(id),
@@ -495,55 +505,18 @@ CREATE TABLE IF NOT EXISTS questionnaires (
 CREATE INDEX IF NOT EXISTS idx_questionnaires_client_id ON questionnaires(client_id);
 CREATE INDEX IF NOT EXISTS idx_questionnaires_slug ON questionnaires(slug);
 
--- A version is an immutable snapshot of the title/description text at
--- the moment of publish (the question snapshot itself lives in
--- questionnaire_questions rows carrying this version's id, copied from
--- the draft set at that same moment -- see below).
+-- An immutable content snapshot at the moment of publish, same role
+-- proposal_versions plays for proposals.
 CREATE TABLE IF NOT EXISTS questionnaire_versions (
   id TEXT PRIMARY KEY,
   questionnaire_id TEXT NOT NULL REFERENCES questionnaires(id),
   version_number INTEGER NOT NULL,
   title TEXT NOT NULL,
-  description TEXT,
+  content_html TEXT NOT NULL,
   created_by TEXT NOT NULL REFERENCES users(id),
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_questionnaire_versions_questionnaire_id ON questionnaire_versions(questionnaire_id);
-
--- Question definitions. version_id NULL means "the live draft buffer"
--- (what the admin question-builder UI reads/writes freely -- add, edit,
--- delete, duplicate, reorder, no versioning concern); a non-NULL
--- version_id means "frozen as part of that published snapshot, never
--- touched again." Publishing copies every current NULL-version_id row
--- into fresh rows stamped with the new version's id, leaving the
--- draft (NULL) rows in place as the ongoing editable set for the next
--- edit cycle -- so a previously-submitted response's version_id always
--- resolves to the exact question set it was answered against, even
--- after the admin edits the draft again afterward.
---
--- options_json is a JSON string[] for the choice-based field types;
--- NULL for every other type. field_type is deliberately a CHECK'd open
--- set (not a separate lookup table like project_stages) so adding a new
--- type later is a one-line CHECK-constraint change plus a client-side
--- renderer addition, matching the spec's own "design the question
--- system so additional field types can be added later without major
--- architectural changes" instruction.
-CREATE TABLE IF NOT EXISTS questionnaire_questions (
-  id TEXT PRIMARY KEY,
-  questionnaire_id TEXT NOT NULL REFERENCES questionnaires(id),
-  version_id TEXT REFERENCES questionnaire_versions(id),
-  section_heading TEXT,
-  section_description TEXT,
-  prompt TEXT NOT NULL,
-  help_text TEXT,
-  field_type TEXT NOT NULL CHECK (field_type IN ('short_text', 'long_text', 'single_choice', 'multi_choice', 'dropdown', 'yes_no', 'date', 'url', 'file')),
-  is_required INTEGER NOT NULL DEFAULT 0,
-  options_json TEXT,
-  sort_order INTEGER NOT NULL,
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_questionnaire_questions_questionnaire_id ON questionnaire_questions(questionnaire_id);
-CREATE INDEX IF NOT EXISTS idx_questionnaire_questions_version_id ON questionnaire_questions(version_id);
 
 -- One proposal per engagement; a client can have several over time (a
 -- revision, a different scope offered later) -- each gets its own
@@ -604,32 +577,19 @@ CREATE INDEX IF NOT EXISTS idx_proposal_signatures_proposal_id ON proposal_signa
 -- One row per real client submission. Locked after creation (no
 -- resubmission in V1, per the spec's "prevent duplicate submissions"
 -- guardrail) -- questionnaires.status flips to 'submitted' on insert.
--- version_id snapshots exactly which question set this response
+-- version_id snapshots exactly which content version this response
 -- answers, independent of any later edits to the questionnaire.
+-- answer_text is the client's one free-text reply -- the questionnaire
+-- redesign above collapsed the old per-question questionnaire_answers
+-- table into this single column, since there is now only ever one
+-- answer per response.
 CREATE TABLE IF NOT EXISTS questionnaire_responses (
   id TEXT PRIMARY KEY,
   questionnaire_id TEXT NOT NULL REFERENCES questionnaires(id),
   version_id TEXT NOT NULL REFERENCES questionnaire_versions(id),
+  answer_text TEXT NOT NULL,
   ip_address TEXT,
   user_agent TEXT,
   submitted_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_questionnaire_responses_questionnaire_id ON questionnaire_responses(questionnaire_id);
-
--- One row per answered question. value_text covers every scalar type
--- (short_text/long_text/dropdown/single_choice/yes_no/date/url);
--- value_json is a JSON string[] for multi_choice; file_url/file_name are
--- only set for the file field type (uploaded via the marketing site's
--- existing Cloudinary archival pattern, same credentials already
--- documented there for WSA signed-PDF archival).
-CREATE TABLE IF NOT EXISTS questionnaire_answers (
-  id TEXT PRIMARY KEY,
-  response_id TEXT NOT NULL REFERENCES questionnaire_responses(id),
-  question_id TEXT NOT NULL REFERENCES questionnaire_questions(id),
-  value_text TEXT,
-  value_json TEXT,
-  file_url TEXT,
-  file_name TEXT,
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_questionnaire_answers_response_id ON questionnaire_answers(response_id);
