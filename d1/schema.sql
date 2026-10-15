@@ -551,9 +551,30 @@ CREATE INDEX IF NOT EXISTS idx_questionnaire_questions_version_id ON questionnai
 -- content_html is the live draft buffer (same draft/published split
 -- rationale as questionnaires above); proposal_versions holds the
 -- frozen, immutable published snapshots.
+--
+-- [2026-10-15] client_id is now nullable and a sibling lead_id was
+-- added, per the operator's direct request for a proposal generator
+-- that "doesn't need a client to be generated" -- staff can send a
+-- proposal to a prospect (a `leads` row) before any client record
+-- exists, exactly as the existing Leads page already models
+-- pre-payment contacts. Exactly one of client_id/lead_id is expected to
+-- be set, enforced in application logic (not a DB CHECK -- SQLite can't
+-- add one to client_id's existing column without a table rebuild, and
+-- the app-level check in ClientKeeper's creation endpoints costs
+-- nothing). A questionnaire can only ever be linked to a client-backed
+-- proposal (questionnaires.client_id is still required below), so a
+-- lead-backed proposal's "send to questionnaire after signing" option
+-- stays unavailable until it's re-pointed at a real client. This is a
+-- clean pre-launch edit to the shape, not a migration against live
+-- data -- this table had never actually been created in the live
+-- database (§24 below; the marketing site's own CLAUDE.md §59.5 flagged
+-- the same "schema not run against the live database yet" gap), so the
+-- `CREATE TABLE IF NOT EXISTS` below is simply correct going forward,
+-- with no ALTER TABLE/rebuild required.
 CREATE TABLE IF NOT EXISTS proposals (
   id TEXT PRIMARY KEY,
-  client_id TEXT NOT NULL REFERENCES clients(id),
+  client_id TEXT REFERENCES clients(id),
+  lead_id TEXT REFERENCES leads(id),
   slug TEXT NOT NULL UNIQUE,
   access_token TEXT NOT NULL UNIQUE,
   title TEXT NOT NULL,
@@ -567,6 +588,7 @@ CREATE TABLE IF NOT EXISTS proposals (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_proposals_client_id ON proposals(client_id);
+CREATE INDEX IF NOT EXISTS idx_proposals_lead_id ON proposals(lead_id);
 CREATE INDEX IF NOT EXISTS idx_proposals_slug ON proposals(slug);
 
 -- Immutable content snapshots -- a signed version is never edited in
