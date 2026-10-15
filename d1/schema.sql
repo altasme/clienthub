@@ -444,3 +444,192 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity_type, entity_id);
+
+-- =====================================================================
+-- Proposals & Questionnaires (CLAUDEproposalquestionnaire.md)
+--
+-- ClientKeeper owns creating/editing/publishing these (staff-only, same
+-- audit_log/client_activity reuse as every other sensitive write in that
+-- app -- no new audit table needed here). The public, client-facing
+-- signing/filling pages live in the marketing site repo
+-- (altasme/altaventureswebsite) at www.altasme.com/proposal/{slug} and
+-- /questions/{slug} -- a deliberate exception to this schema's usual
+-- "only clienthub/clientkeeper read this database" boundary, confirmed
+-- directly with the operator (the literal apex-domain URL was requested
+-- over the account.altasme.com/clienthub-hosted alternative that would
+-- have kept that boundary intact, mirroring the Bill of Service
+-- precedent above). The marketing site needs its own DB binding to this
+-- same database, set up in the Cloudflare Pages dashboard like every
+-- other binding note in this file, to read/write these tables directly.
+--
+-- slug is a readable, client-name-derived identifier (NOT a secret) --
+-- access_token is the real gate, carried as a query param alongside the
+-- friendly path (?t=...), since a slug alone is guessable/predictable
+-- and must never be treated as authentication (same reasoning already
+-- applied to bills.token above, just carried differently in the URL
+-- since the spec for this feature explicitly asked for a readable path
+-- segment rather than the token being the whole path).
+-- =====================================================================
+
+-- Questionnaires first (proposals.questionnaire_id references this),
+-- each with its own client-facing slug/token pair. title/description are
+-- the live DRAFT buffer -- the thing the admin editor reads/writes while
+-- composing, before and between publishes; questionnaire_versions holds
+-- the frozen, published snapshots (see the questions table's comment
+-- below for how the draft/published split works for the question list
+-- itself, which is the part that actually matters for "don't disturb a
+-- submitted response's original questions").
+CREATE TABLE IF NOT EXISTS questionnaires (
+  id TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL REFERENCES clients(id),
+  slug TEXT NOT NULL UNIQUE,
+  access_token TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'submitted', 'closed')),
+  current_version INTEGER NOT NULL DEFAULT 0,  -- 0 until first publish; matches the live questionnaire_versions.version_number
+  created_by TEXT NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_questionnaires_client_id ON questionnaires(client_id);
+CREATE INDEX IF NOT EXISTS idx_questionnaires_slug ON questionnaires(slug);
+
+-- A version is an immutable snapshot of the title/description text at
+-- the moment of publish (the question snapshot itself lives in
+-- questionnaire_questions rows carrying this version's id, copied from
+-- the draft set at that same moment -- see below).
+CREATE TABLE IF NOT EXISTS questionnaire_versions (
+  id TEXT PRIMARY KEY,
+  questionnaire_id TEXT NOT NULL REFERENCES questionnaires(id),
+  version_number INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  created_by TEXT NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_questionnaire_versions_questionnaire_id ON questionnaire_versions(questionnaire_id);
+
+-- Question definitions. version_id NULL means "the live draft buffer"
+-- (what the admin question-builder UI reads/writes freely -- add, edit,
+-- delete, duplicate, reorder, no versioning concern); a non-NULL
+-- version_id means "frozen as part of that published snapshot, never
+-- touched again." Publishing copies every current NULL-version_id row
+-- into fresh rows stamped with the new version's id, leaving the
+-- draft (NULL) rows in place as the ongoing editable set for the next
+-- edit cycle -- so a previously-submitted response's version_id always
+-- resolves to the exact question set it was answered against, even
+-- after the admin edits the draft again afterward.
+--
+-- options_json is a JSON string[] for the choice-based field types;
+-- NULL for every other type. field_type is deliberately a CHECK'd open
+-- set (not a separate lookup table like project_stages) so adding a new
+-- type later is a one-line CHECK-constraint change plus a client-side
+-- renderer addition, matching the spec's own "design the question
+-- system so additional field types can be added later without major
+-- architectural changes" instruction.
+CREATE TABLE IF NOT EXISTS questionnaire_questions (
+  id TEXT PRIMARY KEY,
+  questionnaire_id TEXT NOT NULL REFERENCES questionnaires(id),
+  version_id TEXT REFERENCES questionnaire_versions(id),
+  section_heading TEXT,
+  section_description TEXT,
+  prompt TEXT NOT NULL,
+  help_text TEXT,
+  field_type TEXT NOT NULL CHECK (field_type IN ('short_text', 'long_text', 'single_choice', 'multi_choice', 'dropdown', 'yes_no', 'date', 'url', 'file')),
+  is_required INTEGER NOT NULL DEFAULT 0,
+  options_json TEXT,
+  sort_order INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_questionnaire_questions_questionnaire_id ON questionnaire_questions(questionnaire_id);
+CREATE INDEX IF NOT EXISTS idx_questionnaire_questions_version_id ON questionnaire_questions(version_id);
+
+-- One proposal per engagement; a client can have several over time (a
+-- revision, a different scope offered later) -- each gets its own
+-- slug/token, never overwriting a prior proposal's record. title/
+-- content_html is the live draft buffer (same draft/published split
+-- rationale as questionnaires above); proposal_versions holds the
+-- frozen, immutable published snapshots.
+CREATE TABLE IF NOT EXISTS proposals (
+  id TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL REFERENCES clients(id),
+  slug TEXT NOT NULL UNIQUE,
+  access_token TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  content_html TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'sent', 'signed', 'declined', 'expired', 'revoked')),
+  current_version INTEGER NOT NULL DEFAULT 0,
+  questionnaire_id TEXT REFERENCES questionnaires(id),  -- the questionnaire the client is sent to after signing
+  expires_at TEXT,
+  created_by TEXT NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_proposals_client_id ON proposals(client_id);
+CREATE INDEX IF NOT EXISTS idx_proposals_slug ON proposals(slug);
+
+-- Immutable content snapshots -- a signed version is never edited in
+-- place; a material revision after signing writes a new version and
+-- (in application logic) clears the proposal back to 'published',
+-- requiring a fresh signature rather than silently altering what was
+-- already accepted.
+CREATE TABLE IF NOT EXISTS proposal_versions (
+  id TEXT PRIMARY KEY,
+  proposal_id TEXT NOT NULL REFERENCES proposals(id),
+  version_number INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  content_html TEXT NOT NULL,
+  created_by TEXT NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_proposal_versions_proposal_id ON proposal_versions(proposal_id);
+
+-- The e-signature event + audit evidence. One per proposal in V1 (a
+-- fresh version after signing requires a new signature here, it does
+-- not overwrite this row -- the original acceptance record is kept).
+CREATE TABLE IF NOT EXISTS proposal_signatures (
+  id TEXT PRIMARY KEY,
+  proposal_id TEXT NOT NULL REFERENCES proposals(id),
+  version_id TEXT NOT NULL REFERENCES proposal_versions(id),  -- the exact version that was signed
+  signer_name TEXT NOT NULL,
+  signer_title TEXT,
+  signature_data_url TEXT NOT NULL,  -- data:image/png;base64,... drawn signature image
+  ip_address TEXT,
+  user_agent TEXT,
+  signed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_proposal_signatures_proposal_id ON proposal_signatures(proposal_id);
+
+-- One row per real client submission. Locked after creation (no
+-- resubmission in V1, per the spec's "prevent duplicate submissions"
+-- guardrail) -- questionnaires.status flips to 'submitted' on insert.
+-- version_id snapshots exactly which question set this response
+-- answers, independent of any later edits to the questionnaire.
+CREATE TABLE IF NOT EXISTS questionnaire_responses (
+  id TEXT PRIMARY KEY,
+  questionnaire_id TEXT NOT NULL REFERENCES questionnaires(id),
+  version_id TEXT NOT NULL REFERENCES questionnaire_versions(id),
+  ip_address TEXT,
+  user_agent TEXT,
+  submitted_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_questionnaire_responses_questionnaire_id ON questionnaire_responses(questionnaire_id);
+
+-- One row per answered question. value_text covers every scalar type
+-- (short_text/long_text/dropdown/single_choice/yes_no/date/url);
+-- value_json is a JSON string[] for multi_choice; file_url/file_name are
+-- only set for the file field type (uploaded via the marketing site's
+-- existing Cloudinary archival pattern, same credentials already
+-- documented there for WSA signed-PDF archival).
+CREATE TABLE IF NOT EXISTS questionnaire_answers (
+  id TEXT PRIMARY KEY,
+  response_id TEXT NOT NULL REFERENCES questionnaire_responses(id),
+  question_id TEXT NOT NULL REFERENCES questionnaire_questions(id),
+  value_text TEXT,
+  value_json TEXT,
+  file_url TEXT,
+  file_name TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_questionnaire_answers_response_id ON questionnaire_answers(response_id);
