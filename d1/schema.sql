@@ -597,6 +597,30 @@ CREATE TABLE IF NOT EXISTS proposals (
   current_version INTEGER NOT NULL DEFAULT 0,
   questionnaire_id TEXT REFERENCES questionnaires(id),  -- the questionnaire the client is sent to after signing
   expires_at TEXT,
+  -- [2026-10-29] Payment-request fields, configured by staff per proposal
+  -- in ClientKeeper's editor (not versioned alongside content_html --
+  -- these are operational details, not contractual terms requiring a
+  -- fresh signature, so they can be corrected post-signing without
+  -- invalidating the client's acceptance). The three GCash/bank fields
+  -- default to Altaventures' own real, current payment details so a new
+  -- proposal starts pre-filled and usable without staff having to type
+  -- them every time; payment_amount_label has no sensible default (it's
+  -- always proposal-specific) and publish.ts blocks publishing with it
+  -- blank when payment_enabled is on. payment_marked_paid_at is set by
+  -- the public payment screen's "Done Paying" button -- a client's own
+  -- unverified claim, not a confirmed payment (there's no payment
+  -- gateway here, same manual-GCash/bank-transfer reality as every other
+  -- "send us a screenshot" flow already documented across this
+  -- ecosystem) -- and is cleared on republish of a previously-signed
+  -- proposal (publish.ts), same reasoning as why a material revision
+  -- requires a fresh signature: a stale "I paid" claim against terms
+  -- that just changed isn't meaningful anymore.
+  payment_enabled INTEGER NOT NULL DEFAULT 1,
+  payment_amount_label TEXT NOT NULL DEFAULT '',
+  payment_gcash_number TEXT NOT NULL DEFAULT '09212836683',
+  payment_gcash_account_name TEXT NOT NULL DEFAULT 'Van Da Vinci Amaranto',
+  payment_bank_note TEXT NOT NULL DEFAULT 'Bank transfer available upon request.',
+  payment_marked_paid_at TEXT,
   created_by TEXT NOT NULL REFERENCES users(id),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
