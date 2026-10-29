@@ -629,6 +629,24 @@ CREATE INDEX IF NOT EXISTS idx_proposals_client_id ON proposals(client_id);
 CREATE INDEX IF NOT EXISTS idx_proposals_lead_id ON proposals(lead_id);
 CREATE INDEX IF NOT EXISTS idx_proposals_slug ON proposals(slug);
 
+-- Migration [2026-10-29], for the six payment_* columns above: run this
+-- against an already-deployed database that created `proposals` before
+-- this round -- the CREATE TABLE above only applies to a fresh install.
+-- D1/SQLite supports adding columns with a default without rebuilding
+-- the table. Run once (same DB the Pages projects for altaventureswebsite
+-- and clientkeeper both bind as DB):
+--   npx wrangler d1 execute <database-name> --remote --command "ALTER TABLE proposals ADD COLUMN payment_enabled INTEGER NOT NULL DEFAULT 1;"
+--   npx wrangler d1 execute <database-name> --remote --command "ALTER TABLE proposals ADD COLUMN payment_amount_label TEXT NOT NULL DEFAULT '';"
+--   npx wrangler d1 execute <database-name> --remote --command "ALTER TABLE proposals ADD COLUMN payment_gcash_number TEXT NOT NULL DEFAULT '09212836683';"
+--   npx wrangler d1 execute <database-name> --remote --command "ALTER TABLE proposals ADD COLUMN payment_gcash_account_name TEXT NOT NULL DEFAULT 'Van Da Vinci Amaranto';"
+--   npx wrangler d1 execute <database-name> --remote --command "ALTER TABLE proposals ADD COLUMN payment_bank_note TEXT NOT NULL DEFAULT 'Bank transfer available upon request.';"
+--   npx wrangler d1 execute <database-name> --remote --command "ALTER TABLE proposals ADD COLUMN payment_marked_paid_at TEXT;"
+-- Until this runs, any GET/PATCH on an existing proposal (clientkeeper's
+-- functions/api/app/proposals/[proposalId].ts, which SELECTs all six
+-- columns unconditionally) 500s with "no such column" -- this is the
+-- known open item CLAUDE.md §67.7 flagged ("still needs to be applied to
+-- the live production database"), not a new bug.
+
 -- Immutable content snapshots -- a signed version is never edited in
 -- place; a material revision after signing writes a new version and
 -- (in application logic) clears the proposal back to 'published',
