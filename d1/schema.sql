@@ -731,21 +731,19 @@ CREATE INDEX IF NOT EXISTS idx_questionnaire_answers_response_id ON questionnair
 -- an intake questionnaire after signing is a sales-funnel concept that
 -- belongs to the proposal that precedes a contract, not the contract
 -- itself -- can be added later if a real need for it shows up).
+-- [2026-10-31] Corrected from the first version of this table: a
+-- service agreement is a binding legal contract, not a sales pitch, so
+-- unlike `proposals` it must always belong to a real, already-onboarded
+-- client -- never a bare lead and never a standalone prospect with no
+-- client record at all. `client_id` is NOT NULL here (proposals' own
+-- `client_id` is nullable); there is no `lead_id` and no
+-- `prospect_*`/auto-client-creation-on-signing mechanism, since there's
+-- no case where a signer isn't already a real client. This table had
+-- never been deployed to production, so this is a clean rewrite of the
+-- original `CREATE TABLE`, not a migration against live data.
 CREATE TABLE IF NOT EXISTS service_agreements (
   id TEXT PRIMARY KEY,
-  client_id TEXT REFERENCES clients(id),
-  lead_id TEXT REFERENCES leads(id),
-  -- Same "fully standalone" shape as proposals.prospect_* (CLAUDE.md
-  -- §63): populated only when client_id AND lead_id are both NULL,
-  -- typed in by staff at creation since there's no lead/client row to
-  -- read a name/business/email off of. The public agreement-sign
-  -- endpoint reads these to auto-create a real clients row the moment
-  -- the signer accepts. Never edited after creation (no PATCH support),
-  -- same reasoning as proposals' own identical fields.
-  prospect_full_name TEXT,
-  prospect_business_name TEXT,
-  prospect_email TEXT,
-  prospect_phone TEXT,
+  client_id TEXT NOT NULL REFERENCES clients(id),
   slug TEXT NOT NULL UNIQUE,
   access_token TEXT NOT NULL UNIQUE,
   title TEXT NOT NULL,
@@ -758,7 +756,6 @@ CREATE TABLE IF NOT EXISTS service_agreements (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_service_agreements_client_id ON service_agreements(client_id);
-CREATE INDEX IF NOT EXISTS idx_service_agreements_lead_id ON service_agreements(lead_id);
 CREATE INDEX IF NOT EXISTS idx_service_agreements_slug ON service_agreements(slug);
 
 -- Immutable content snapshots, identical shape/purpose to
