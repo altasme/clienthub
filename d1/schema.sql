@@ -711,3 +711,86 @@ CREATE TABLE IF NOT EXISTS questionnaire_answers (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_questionnaire_answers_response_id ON questionnaire_answers(response_id);
+
+-- Service Agreement Generator (a staff-authored, e-signed legal
+-- agreement per client/engagement), cloned from the Proposals schema
+-- above -- same mechanics (draft buffer -> immutable published
+-- versions -> e-signature, a standalone agreement with no lead/client
+-- yet auto-creates a real client on signing), but a deliberately
+-- separate set of tables rather than a `document_type` column on
+-- `proposals` itself. Reasoning: a proposal is a sales pitch (open,
+-- revisable, sent before money or trust exist); a service agreement is
+-- the binding contract (the thing /WSA-free and /WSA-pro already are
+-- for Altaventures' own two fixed offers, CLAUDE.md §17/§57) -- mixing
+-- both into one `status`/`content_html` table would make every future
+-- proposal-only or agreement-only feature (e.g. the proposal payment-
+-- request fields below) need a conditional check on which kind of row
+-- it is. Two differences from `proposals`, both the operator's own
+-- confirmed decision: no payment_* columns (signature only, no
+-- payment-request step), and no questionnaire_id (sending a client to
+-- an intake questionnaire after signing is a sales-funnel concept that
+-- belongs to the proposal that precedes a contract, not the contract
+-- itself -- can be added later if a real need for it shows up).
+CREATE TABLE IF NOT EXISTS service_agreements (
+  id TEXT PRIMARY KEY,
+  client_id TEXT REFERENCES clients(id),
+  lead_id TEXT REFERENCES leads(id),
+  -- Same "fully standalone" shape as proposals.prospect_* (CLAUDE.md
+  -- §63): populated only when client_id AND lead_id are both NULL,
+  -- typed in by staff at creation since there's no lead/client row to
+  -- read a name/business/email off of. The public agreement-sign
+  -- endpoint reads these to auto-create a real clients row the moment
+  -- the signer accepts. Never edited after creation (no PATCH support),
+  -- same reasoning as proposals' own identical fields.
+  prospect_full_name TEXT,
+  prospect_business_name TEXT,
+  prospect_email TEXT,
+  prospect_phone TEXT,
+  slug TEXT NOT NULL UNIQUE,
+  access_token TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  content_html TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'sent', 'signed', 'declined', 'expired', 'revoked')),
+  current_version INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT,
+  created_by TEXT NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_service_agreements_client_id ON service_agreements(client_id);
+CREATE INDEX IF NOT EXISTS idx_service_agreements_lead_id ON service_agreements(lead_id);
+CREATE INDEX IF NOT EXISTS idx_service_agreements_slug ON service_agreements(slug);
+
+-- Immutable content snapshots, identical shape/purpose to
+-- proposal_versions -- a signed version is never edited in place; a
+-- material revision after signing writes a new version and (in
+-- application logic) resets status back to 'published', requiring a
+-- fresh signature rather than silently altering what was already
+-- accepted.
+CREATE TABLE IF NOT EXISTS service_agreement_versions (
+  id TEXT PRIMARY KEY,
+  service_agreement_id TEXT NOT NULL REFERENCES service_agreements(id),
+  version_number INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  content_html TEXT NOT NULL,
+  created_by TEXT NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_service_agreement_versions_agreement_id ON service_agreement_versions(service_agreement_id);
+
+-- The e-signature event + audit evidence, identical shape to
+-- proposal_signatures. One per agreement in V1 -- a fresh version after
+-- signing requires a new signature here, it does not overwrite this
+-- row (the original acceptance record is kept).
+CREATE TABLE IF NOT EXISTS service_agreement_signatures (
+  id TEXT PRIMARY KEY,
+  service_agreement_id TEXT NOT NULL REFERENCES service_agreements(id),
+  version_id TEXT NOT NULL REFERENCES service_agreement_versions(id),
+  signer_name TEXT NOT NULL,
+  signer_title TEXT,
+  signature_data_url TEXT NOT NULL,
+  ip_address TEXT,
+  user_agent TEXT,
+  signed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_service_agreement_signatures_agreement_id ON service_agreement_signatures(service_agreement_id);
