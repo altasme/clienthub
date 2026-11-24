@@ -702,3 +702,19 @@ Per the operator's direct correction ("Service agreements are actually and must 
 **How this was tested:** verified locally only, same standing limitation as every prior round touching this schema. Applied the corrected `CREATE TABLE IF NOT EXISTS service_agreements` against a fresh local D1 instance and confirmed: inserting a row with a real `client_id` succeeds; inserting a row with `client_id = NULL` correctly fails the `NOT NULL` constraint. See clientkeeper's CLAUDE.md §30.4 for the full cross-repo end-to-end re-test (create → publish → sign, now exclusively through the client-nested path).
 
 **Known open items:** unchanged from §28 — the table still needs its one-time production D1 deploy, now with this corrected shape (so there is no live data to worry about losing by this correction).
+
+---
+
+## 30. Webmail module: schema only, this repo untouched otherwise [2026-11-24]
+
+ClientKeeper gained a full staff webmail module (`/mail`: inbox/sent/drafts/starred/archive/junk/trash, threading, search, labels, attachments, signatures, several sender identities, SMTP sending with tracked retries, inbound mail through Cloudflare Email Routing). The operator confirmed it covers **Altaventures' own staff mailboxes only**, not per-client mail, so it has no `tenant_id`. The mailbox identity (`mail_accounts.id`) scopes all data, and `mail_account_access` is the explicit list of which `users` may read, and optionally send from, which mailbox. Nobody has access until granted. This repo's role is the same as for proposals and agreements: it owns the canonical schema. See clientkeeper's CLAUDE.md §32 for all the code.
+
+**New objects in `d1/schema.sql` (webmail block at the end of the file):** `mail_accounts`, `mail_account_access`, `mail_signatures`, `mail_threads`, `mail_messages` (`UNIQUE(account_id, dedupe_key)` makes inbound processing idempotent), `mail_recipients`, `mail_drafts` (optimistic-concurrency `version`), `mail_attachments` (only R2 object keys, never bytes), `mail_labels`, `mail_message_labels`, `mail_send_jobs` (`idempotency_key UNIQUE`, `locked_until` lease), `mail_send_attempts`, `mail_events` (audit trail, with no FK on `message_id` so it survives a permanent delete), `mail_inbound_failures`, `mail_user_settings`, `mail_settings`. There is also one FTS5 virtual table, `mail_messages_fts`, for full-text search. Note that `wrangler d1 export` doesn't export virtual tables; the index can be rebuilt from `mail_messages`.
+
+**Two new writers to this database, and neither is in this repo:** ClientKeeper's Pages Functions, plus a brand-new standalone Worker (`clientkeeper/mail-worker/`). That Worker binds the same database as `DB`, because Cloudflare's inbound `email()` handler can't be a Pages Function. clienthub and altaventureswebsite never touch these tables.
+
+**Migration:** everything in the block is new, and every other statement in the file is `IF NOT EXISTS` / `INSERT OR IGNORE`. So re-running the whole file against the live database (`npx wrangler d1 execute <database-name> --remote --file=./d1/schema.sql`) applies the webmail tables and leaves existing tables untouched. No `ALTER TABLE` is needed this round. Run it **before** deploying the ClientKeeper webmail code. The file's own comment includes the SQL to bootstrap the first mailbox and the first access grant.
+
+**How this was tested:** locally only, as in every round touching this schema; this session has no Cloudflare access. The full `schema.sql` applied cleanly to a fresh local D1 via `wrangler d1 execute --local --file`, including the FTS5 virtual table. ClientKeeper's `wrangler pages dev` and the mail worker's `wrangler dev` then both ran against that one local database and exercised every table end to end; see clientkeeper's CLAUDE.md §32.6.
+
+**Known open items:** the one-time production run of the schema. As always, no automated sync exists between this file and the consuming repo.
