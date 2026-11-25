@@ -718,3 +718,35 @@ ClientKeeper gained a full staff webmail module (`/mail`: inbox/sent/drafts/star
 **How this was tested:** locally only, as in every round touching this schema; this session has no Cloudflare access. The full `schema.sql` applied cleanly to a fresh local D1 via `wrangler d1 execute --local --file`, including the FTS5 virtual table. ClientKeeper's `wrangler pages dev` and the mail worker's `wrangler dev` then both ran against that one local database and exercised every table end to end; see clientkeeper's CLAUDE.md §32.6.
 
 **Known open items:** the one-time production run of the schema. As always, no automated sync exists between this file and the consuming repo.
+
+---
+
+## 31. Email Services: schema for client email hosting, this repo untouched otherwise [2026-11-25]
+
+ClientKeeper gained an "Email Services" module for selling and managing email hosting for clients: plans, mailbox allowances, domains, and mailboxes created at a third-party provider (Z.com first). See clientkeeper's CLAUDE.md §34 for the code. As with proposals, agreements and webmail, this repo owns the canonical schema and nothing else changes this round.
+
+**New objects** (the "Email Services" block at the end of `d1/schema.sql`):
+
+| Table | Notes |
+|---|---|
+| `email_plans` | Seeded with Solo ₱1,500/1 mailbox/3 GB, Team ₱1,999/3/3 GB, Growth ₱4,199/10/10 GB, Business ₱5,499/15/30 GB, Enterprise ₱10,999/20/100 GB; ₱250/yr per additional mailbox. Stable slug ids so the seed is idempotent |
+| `email_services` | `client_id → clients`; plan values snapshotted at assignment |
+| `email_service_entitlements` | Add-on/override ledger |
+| `email_domains` | Partial unique index: a domain is live on one service only |
+| `email_mailboxes` | State machine + reservation in one row; partial unique indexes on live address and live primary; no password column |
+| `email_provisioning_logs` | |
+| `email_audit_logs` | `actor_type` staff/client/system |
+
+**Room left for the confirmed (not yet built) webmail bridge** on `email_mailboxes`: client mailboxes will eventually be read and sent through ClientKeeper's own webmail rather than Z.com's.
+- `inbound_source` (`cloudflare_email_routing` | `zcom_poll_sync`);
+- the provider's own `provider_service_id` / `provider_mailbox_id` (Z.com's opaque `service_id` / `email_id`);
+- a nullable `mail_account_id → mail_accounts(id)`.
+
+**Not in this repo yet:** the client-facing "Email Management" module (Phase 5). It will read these same tables scoped by the session's `clients.id`. Client-created mailboxes go through the same entitlement engine and are logged with `actor_type = 'client'`.
+
+**Migration:** all objects are new, so re-run the whole file (`npx wrangler d1 execute <database-name> --remote --file=./d1/schema.sql`) before deploying ClientKeeper's module. No `ALTER TABLE` is needed.
+
+**How this was tested:** locally only.
+- The full file applies cleanly to an empty SQLite (Node's `node:sqlite`) and to a local D1 under `wrangler`.
+- ClientKeeper's engine test suite runs against a verbatim copy of this block, with a drift-guard test comparing the two.
+- ClientKeeper's `wrangler pages dev` exercised every table end to end (clientkeeper CLAUDE.md §34.7).
