@@ -1409,3 +1409,55 @@ CREATE INDEX IF NOT EXISTS idx_email_audit_logs_service ON email_audit_logs(serv
 --   npx wrangler d1 execute <database-name> --remote --file=./d1/schema.sql
 -- Run it BEFORE deploying ClientKeeper's Email Services module, whose
 -- routes query these tables unconditionally.
+
+-- One-time, token-gated links that let a client ask for a mailbox on a
+-- specific email service without logging in to anything [2026-11-26].
+-- Staff generate one in ClientKeeper (EmailServiceDetailPage, "Mailbox
+-- request links") and send it by hand (chat, email); the client opens
+-- www.altasme.com/mailbox-request/:slug?t=... on the marketing site
+-- (altaventureswebsite's functions/api/public/mailbox-request/*), picks a
+-- name, and that creates the same client-requested 'reserved' row
+-- requestMailboxByClient creates (reserved_until NULL, created_by_type
+-- 'client', created_by = the service's client_id), which staff then
+-- fulfill or decline exactly as before. clienthub's own app is not
+-- involved.
+--
+-- Same slug + access_token design as proposals/questionnaires/
+-- service_agreements: the slug is readable and predictable, the
+-- access_token is the real gate, compared in constant time by the public
+-- route, and a bad token, a revoked link and a used link all answer the
+-- same 404 so a stranger can't tell which.
+--
+-- service_id IS the authorization: a link can only ever reserve against
+-- its own service, checked inside the single INSERT that reserves the
+-- slot (the link's own status = 'open' is in that same statement too, so
+-- two submissions of one link can't both get in). A link is single-use:
+-- 'open' -> 'used' in the same batch as the reservation, with
+-- used_mailbox_id pointing at the email_mailboxes row it created, so
+-- staff can trace a link straight to its request. 'revoked' is a staff
+-- action, refused once the link has been used. Not touched when staff
+-- later fulfill or decline that request: the link's job ended when the
+-- request was made.
+CREATE TABLE IF NOT EXISTS mail_request_links (
+  id TEXT PRIMARY KEY,
+  service_id TEXT NOT NULL REFERENCES email_services(id),
+  slug TEXT NOT NULL UNIQUE,
+  access_token TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'used', 'revoked')),
+  created_by TEXT REFERENCES users(id),
+  used_at TEXT,
+  used_mailbox_id TEXT,                      -- email_mailboxes.id; no REFERENCES, same reasoning as email_provisioning_logs.mailbox_id
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mail_request_links_service_id ON mail_request_links(service_id);
+CREATE INDEX IF NOT EXISTS idx_mail_request_links_slug ON mail_request_links(slug);
+
+-- Migration [2026-11-26], mailbox request links: a brand-new table, so
+-- re-running this whole file is enough (everything else is IF NOT EXISTS
+-- / INSERT OR IGNORE and a no-op on the existing tables):
+--   npx wrangler d1 execute <database-name> --remote --file=./d1/schema.sql
+-- or run just the three statements above. Run it BEFORE deploying the
+-- ClientKeeper request-link routes and the marketing site's
+-- /mailbox-request page: both query this table unconditionally and fail
+-- with "no such table" until it has run.
