@@ -750,3 +750,19 @@ ClientKeeper gained an "Email Services" module for selling and managing email ho
 - The full file applies cleanly to an empty SQLite (Node's `node:sqlite`) and to a local D1 under `wrangler`.
 - ClientKeeper's engine test suite runs against a verbatim copy of this block, with a drift-guard test comparing the two.
 - ClientKeeper's `wrangler pages dev` exercised every table end to end (clientkeeper CLAUDE.md §34.7).
+
+## 32. Mailbox request links: one new table, this repo's app untouched [2026-11-26]
+
+ClientKeeper's `requestMailboxByClient` (its CLAUDE.md §35) had no caller: nothing let a client actually ask for a mailbox. The operator's decision: **not** a page in this app. It works like the proposal/questionnaire links instead. Staff generate a one-time, token-gated link in ClientKeeper and send it by hand; the client opens `www.altasme.com/mailbox-request/:slug?t=...` on the marketing site, picks a name, and submits. No login, no account, no clienthub route. Only `d1/schema.sql` changed here, because it is the shared database's canonical definition.
+
+**New table** (appended to the end of the "Email Services" block, so ClientKeeper's drift-guarded fixture carries it verbatim):
+
+| Table | Notes |
+|---|---|
+| `mail_request_links` | `service_id → email_services`; `slug` + `access_token`, both UNIQUE, same design as `proposals`; `status` `open` / `used` / `revoked`; `created_by → users`; `used_at`; `used_mailbox_id` (the `email_mailboxes` row the link created; no FK, like `email_provisioning_logs.mailbox_id`) |
+
+The link's `service_id` is the whole authorization. The marketing site's submit route checks it, and `status = 'open'`, inside the same `INSERT ... SELECT` that reserves the slot, and marks the link `used` in the same batch.
+
+**Migration:** a brand-new table, so re-run the whole file (`npx wrangler d1 execute <database-name> --remote --file=./d1/schema.sql`), or just its three statements, before deploying ClientKeeper's request-link routes and the marketing site's `/mailbox-request` page. No `ALTER TABLE` is needed.
+
+**How this was tested:** locally only (no live database access). The full file applied cleanly to a local D1 under `wrangler`, and ClientKeeper and the marketing site both ran against that one local database together. See clientkeeper CLAUDE.md §36 and altaventureswebsite CLAUDE.md §74.
