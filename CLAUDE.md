@@ -766,3 +766,27 @@ The link's `service_id` is the whole authorization. The marketing site's submit 
 **Migration:** a brand-new table, so re-run the whole file (`npx wrangler d1 execute <database-name> --remote --file=./d1/schema.sql`), or just its three statements, before deploying ClientKeeper's request-link routes and the marketing site's `/mailbox-request` page. No `ALTER TABLE` is needed.
 
 **How this was tested:** locally only (no live database access). The full file applied cleanly to a local D1 under `wrangler`, and ClientKeeper and the marketing site both ran against that one local database together. See clientkeeper CLAUDE.md §36 and altaventureswebsite CLAUDE.md §74.
+
+## 33. Webmail Connect: four new tables for single sign-on from a client's own admin panel, this repo's app untouched [2026-11-27]
+
+Forward-looking. No client admin panel uses this yet. It's the schema for "Webmail Connect": a future Altaventures-built client panel (using the new `altasme/webmail-connect` package) lets its logged-in users open the mailboxes they've been assigned inside ClientKeeper's webmail at `mail.altasme.com`, by single sign-on, with no mailbox password anywhere. ClientKeeper is the only reader and writer (its CLAUDE.md §38). Only `d1/schema.sql` changed here, because it is the shared database's canonical definition.
+
+The identity is the **mailbox** (`mail_accounts`). A panel user is an opaque `external_user_id`, only unique within one integration, and never becomes a webmail account.
+
+**New tables** (a new block appended after `mail_request_links`, so ClientKeeper's fixture carries it verbatim):
+
+| Table | Notes |
+|---|---|
+| `mail_client_integrations` | One registered panel. `client_id → clients` (whose panel it is); `name`; `secret_hash` (SHA-256 of the API secret, which is never stored); `status` `active` / `disabled`; `created_by → users` |
+| `mail_client_integration_mailboxes` | Mailboxes Altaventures staff explicitly allow an integration to grant, on top of its own client's hosted mailboxes. PK `(integration_id, mail_account_id)`. Staff-only writes |
+| `mail_external_mailbox_access` | Which panel user may open which mailbox: `can_read` / `can_send` / `can_delete` / `can_manage_settings`, `is_default` (partial unique index: at most one per user), `granted_by` (free text, deliberately not verified). Unique on `(integration_id, external_user_id, mail_account_id)` |
+| `mail_launch_codes` | Single-use, ~60 s codes. `code` UNIQUE (raw, 256-bit, same convention as `mail_request_links.access_token`); `status` `pending` / `used` / `expired`; `return_url` |
+
+**The tenant boundary lives in how ClientKeeper reads these tables, not in a foreign key.** An integration can only grant a mailbox that is either one of its own client's active hosted mailboxes (`email_mailboxes` → `email_services.client_id`) or one staff attached to it. The attachment table exists because some real mailboxes, like Altaventures' own `sales@altasme.com`, have no `email_mailboxes` row and mustn't get one: that would make them eligible for the mailbox-password login (ClientKeeper §37).
+
+**Migration:** four brand-new tables. Re-run the whole file (`npx wrangler d1 execute <database-name> --remote --file=./d1/schema.sql`), or just this block's statements, **before** deploying ClientKeeper's `/api/mail-connect/*` and `/api/app/mail-integrations/*` routes. No `ALTER TABLE` is needed.
+
+**How this was tested:** locally only (no live database access).
+- The full file applies cleanly to an empty SQLite and to a local D1 under `wrangler`.
+- ClientKeeper's test suite runs against the verbatim copy and against this file directly (`EMAIL_TESTS_USE_CLIENTHUB_SCHEMA=1`).
+- ClientKeeper ran end to end on this schema with the reference demo panel (clientkeeper CLAUDE.md §38.7).
