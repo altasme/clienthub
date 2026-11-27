@@ -1461,3 +1461,135 @@ CREATE INDEX IF NOT EXISTS idx_mail_request_links_slug ON mail_request_links(slu
 -- ClientKeeper request-link routes and the marketing site's
 -- /mailbox-request page: both query this table unconditionally and fail
 -- with "no such table" until it has run.
+
+-- =====================================================================
+-- Webmail Connect: single sign-on from a client's OWN admin panel into
+-- ClientKeeper's webmail [2026-11-27]
+--
+-- Forward-looking: no client admin panel uses this yet. A future
+-- Altaventures-built admin panel installs @altasme/webmail-connect (its
+-- own repo), and its logged-in users open the mailboxes they've been
+-- assigned inside mail.altasme.com without ever typing a mailbox
+-- password. Nothing here touches the webmail tables' own rows: it only
+-- decides WHO (an outside panel's user) may open WHICH existing
+-- mail_accounts row, and how that person gets a session.
+--
+-- The identity is the MAILBOX (mail_accounts), never the panel's user.
+-- A panel user is an opaque `external_user_id` that the integration
+-- assigns; it is only unique WITHIN one integration and is never a
+-- webmail account of its own. Many panel users may share one mailbox;
+-- one panel user may have many mailboxes.
+--
+-- Three layers of authorization, all checked server-side on every
+-- request by ClientKeeper (functions/_lib/mailConnect/*):
+--   1. the integration itself: a row below, status 'active', proven by a
+--      bearer secret whose SHA-256 is stored here (never the secret);
+--   2. which mailboxes that integration may hand out at all (the tenant
+--      boundary): its own client's hosted mailboxes (email_mailboxes ->
+--      email_services.client_id), plus any mailbox Altaventures staff
+--      explicitly attached in mail_client_integration_mailboxes;
+--   3. which of those this particular panel user was granted, with which
+--      permissions (mail_external_mailbox_access, set by the client's own
+--      Super Admin through the integration's API).
+-- A grant that falls outside layer 2 later (service suspended, mailbox
+-- deleted, staff detached it) stops working on the next request; it is
+-- not deleted, so it comes back if the mailbox does.
+--
+-- No mailbox password is involved anywhere in this block. Writers:
+-- ClientKeeper only (staff routes for the first two tables, the
+-- integration's bearer-authenticated API for the last two).
+-- =====================================================================
+
+-- One registered client admin panel. client_id is the Altaventures client
+-- whose panel this is. secret_hash = lowercase hex SHA-256 of the full
+-- API secret (wmc_<id>_<64 hex>); the secret is shown to staff once at
+-- creation/rotation and can never be retrieved again. Rotating replaces
+-- the hash, so the old secret stops working immediately. 'disabled'
+-- refuses the secret, every pending launch code and every live session
+-- on their next use.
+CREATE TABLE IF NOT EXISTS mail_client_integrations (
+  id TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL REFERENCES clients(id),
+  name TEXT NOT NULL,
+  secret_hash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+  created_by TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mail_client_integrations_client_id ON mail_client_integrations(client_id);
+
+-- Mailboxes Altaventures staff explicitly allow an integration to grant,
+-- on top of its own client's hosted mailboxes. Exists because some real
+-- mailboxes have no email_mailboxes row and must not get one: e.g.
+-- Altaventures' own altasme.com mailboxes, which would otherwise become
+-- eligible for the mailbox-password login (ClientKeeper CLAUDE.md §37).
+-- Staff-only writes; an integration can never add to this list itself.
+CREATE TABLE IF NOT EXISTS mail_client_integration_mailboxes (
+  integration_id TEXT NOT NULL REFERENCES mail_client_integrations(id),
+  mail_account_id TEXT NOT NULL REFERENCES mail_accounts(id),
+  created_by TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (integration_id, mail_account_id)
+);
+
+-- Which panel user may open which mailbox, with what permissions.
+-- Revoking deletes the row. can_read = 0 grants nothing at all (a grant
+-- must at least allow reading to be usable). is_default picks the
+-- mailbox opened first when a user has several; at most one per user
+-- (partial unique index below).
+-- granted_by is free text: whatever external_user_id the integration said
+-- made the change. Altaventures does NOT verify that person's real-world
+-- identity or role, only that the call carried that integration's valid
+-- secret. That is the deliberate trust boundary: inside its own tenant,
+-- the integration (the client's own panel) is the authority on its users.
+CREATE TABLE IF NOT EXISTS mail_external_mailbox_access (
+  id TEXT PRIMARY KEY,
+  integration_id TEXT NOT NULL REFERENCES mail_client_integrations(id),
+  external_user_id TEXT NOT NULL,
+  mail_account_id TEXT NOT NULL REFERENCES mail_accounts(id),
+  can_read INTEGER NOT NULL DEFAULT 1,
+  can_send INTEGER NOT NULL DEFAULT 0,
+  can_delete INTEGER NOT NULL DEFAULT 0,
+  can_manage_settings INTEGER NOT NULL DEFAULT 0,
+  is_default INTEGER NOT NULL DEFAULT 0,
+  granted_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (integration_id, external_user_id, mail_account_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mail_external_mailbox_access_default ON mail_external_mailbox_access(integration_id, external_user_id) WHERE is_default = 1;
+CREATE INDEX IF NOT EXISTS idx_mail_external_mailbox_access_account ON mail_external_mailbox_access(mail_account_id);
+
+-- Short-lived, single-use codes that carry a panel user from their panel
+-- into webmail. The integration's backend asks for one (bearer secret),
+-- the browser is sent to mail.altasme.com/api/mail-connect/exchange?code=,
+-- and that route claims it with ONE conditional UPDATE (status 'pending'
+-- and not expired -> 'used'), so a code can never be redeemed twice, even
+-- concurrently. expires_at is ~60 s after issue: the code is consumed by a
+-- redirect a second later, never typed. `code` is the raw value (same
+-- convention as mail_request_links.access_token), compared in constant
+-- time; it is also the whole credential, so it's 256 bits of randomness.
+-- return_url is the integration's own "back to the panel" URL (absolute
+-- http/https; its host is the integration's business, not ours).
+CREATE TABLE IF NOT EXISTS mail_launch_codes (
+  id TEXT PRIMARY KEY,
+  integration_id TEXT NOT NULL REFERENCES mail_client_integrations(id),
+  external_user_id TEXT NOT NULL,
+  return_url TEXT,
+  code TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'used', 'expired')),
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mail_launch_codes_integration ON mail_launch_codes(integration_id, created_at);
+
+-- Migration [2026-11-27], Webmail Connect: four brand-new tables, so
+-- re-running this whole file is enough (everything else is IF NOT EXISTS
+-- / INSERT OR IGNORE and a no-op on the existing tables):
+--   npx wrangler d1 execute <database-name> --remote --file=./d1/schema.sql
+-- or run just the statements in this block. Run it BEFORE deploying
+-- ClientKeeper's /api/mail-connect/* and /api/app/mail-integrations/*
+-- routes: they query these tables unconditionally and fail with "no such
+-- table" until it has run. No ALTER TABLE is needed.
